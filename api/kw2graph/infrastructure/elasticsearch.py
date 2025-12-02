@@ -3,13 +3,14 @@ from elastic_transport import ObjectApiResponse
 from elasticsearch import Elasticsearch
 
 from kw2graph import config
+from kw2graph.infrastructure.base import RepositoryBase
 
 logger = structlog.get_logger(__name__)
 
 
-class ElasticsearchClient:
-
+class ElasticsearchRepository(RepositoryBase):
     def __init__(self, settings: config.Settings):
+        super().__init__(settings)
         logger.info("Initializing ElasticsearchClient", es_host=settings.es_host)
         self.host = settings.es_host
         self.api_key = settings.es_api_key

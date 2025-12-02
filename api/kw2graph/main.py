@@ -8,8 +8,11 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from kw2graph import settings
+from kw2graph.usecase.analyze import AnalyzeKeywordsUseCase
 from kw2graph.usecase.candidate import GetCandidateUseCase
+from kw2graph.usecase.input.analyze import AnalyzeKeywordsInput
 from kw2graph.usecase.input.candidate import GetCandidateInput
+from kw2graph.usecase.output.analyze import AnalyzeKeywordsOutput
 from kw2graph.usecase.output.candidate import GetCandidateOutput
 
 logger = structlog.get_logger(__name__)
@@ -22,9 +25,16 @@ async def healthz():
     return {'status': 'UP'}
 
 
-@app.get("/candidate", response_model=GetCandidateOutput)
+@app.get('/candidate', response_model=GetCandidateOutput)
 async def get_candidate(request: GetCandidateInput):
     use_case = GetCandidateUseCase(settings)
+    response = use_case.execute(request)
+    return response
+
+
+@app.get('/analyze', response_model=AnalyzeKeywordsOutput)
+async def analyze(request: AnalyzeKeywordsInput):
+    use_case = AnalyzeKeywordsUseCase(settings)
     response = use_case.execute(request)
     return response
 
