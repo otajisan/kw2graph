@@ -2,7 +2,25 @@
 
 import React, { useState, useCallback, useTransition, useEffect, useRef } from 'react';
 import axios, { AxiosError } from 'axios';
-import styles from './page.module.css';
+
+// Material UI のコンポーネントをインポート
+// 💡 @mui/material-nextjs の利用には、このコアパッケージのインポートが必要です
+import {
+    Box,
+    Button,
+    Container,
+    TextField,
+    Typography,
+    Paper,
+    CircularProgress,
+    Stack,
+    List,
+    ListItem,
+    Chip,
+    Alert,
+    Divider,
+    Grid
+} from '@mui/material';
 
 // APIのベースURL。FastAPIが動いているURLを指定
 const API_BASE_URL = 'http://localhost:8000';
@@ -16,7 +34,6 @@ interface Candidate {
         title: string;
     };
 }
-
 interface CandidateResponse {
     seed_keyword: string;
     candidates: Candidate[];
@@ -27,7 +44,6 @@ interface AnalyzeKeywordsOutputItem {
     keyword: string;
     score: number;
 }
-
 interface AnalyzeKeywordsOutput {
     seed_keyword: string;
     results: AnalyzeKeywordsOutputItem[];
@@ -57,7 +73,6 @@ interface GraphEdge {
     to_node: string;
     score: number;
 }
-
 interface ShowGraphOutput {
     nodes: GraphNode[];
     edges: GraphEdge[];
@@ -70,19 +85,19 @@ export default function Home() {
     const [keyword, setKeyword] = useState<string>('');
     const [candidateData, setCandidateData] = useState<CandidateResponse | null>(null);
     const [analyzeData, setAnalyzeData] = useState<AnalyzeKeywordsOutput | null>(null);
-    const [graphData, setGraphData] = useState<ShowGraphOutput | null>(null); // 💡 グラフデータ
+    const [graphData, setGraphData] = useState<ShowGraphOutput | null>(null);
 
     const [error, setError] = useState<string | null>(null);
 
     const [isPending, startTransition] = useTransition();
     const [isAnalyzePending, startAnalyzeTransition] = useTransition();
     const [isCreatePending, startCreateTransition] = useTransition();
-    const [isGraphPending, startGraphTransition] = useTransition(); // 💡 グラフ描画ローディング
+    const [isGraphPending, startGraphTransition] = useTransition();
 
     const [createStatus, setCreateStatus] = useState<'idle' | 'success' | 'failure'>('idle');
 
 
-    // --- API関数 ---
+    // --- API関数群 ---
 
     const handleAxiosError = (err: unknown, apiName: string) => {
         if (axios.isAxiosError(err)) {
@@ -97,25 +112,18 @@ export default function Home() {
         console.error(`Axios Error (${apiName}):`, err);
     };
 
-
-    // 1. Candidate API
     const fetchCandidate = useCallback(async (kw: string) => {
         setError(null);
         setCandidateData(null);
         setAnalyzeData(null);
-        setGraphData(null); // グラフデータもクリア
+        setGraphData(null);
         setCreateStatus('idle');
 
-        const payload = {
-            index: 'videos',
-            field: 'snippet.title',
-            keyword: kw,
-        };
+        const payload = { index: 'videos', field: 'snippet.title', keyword: kw };
 
         try {
             const response = await axios.post<CandidateResponse>(
-                `${API_BASE_URL}/candidate`,
-                payload,
+                `${API_BASE_URL}/candidate`, payload,
                 { headers: { 'Content-Type': 'application/json' } }
             );
             setCandidateData(response.data);
@@ -124,22 +132,17 @@ export default function Home() {
         }
     }, []);
 
-    // 2. Analyze API
     const fetchAnalyze = useCallback(async (seedKeyword: string, titles: string[]) => {
         setAnalyzeData(null);
         setGraphData(null);
         setCreateStatus('idle');
         setError(null);
 
-        const payload = {
-            seed_keyword: seedKeyword,
-            children: titles,
-        };
+        const payload = { seed_keyword: seedKeyword, children: titles };
 
         try {
             const response = await axios.post<AnalyzeKeywordsOutput>(
-                `${API_BASE_URL}/analyze`,
-                payload,
+                `${API_BASE_URL}/analyze`, payload,
                 { headers: { 'Content-Type': 'application/json' } }
             );
             setAnalyzeData(response.data);
@@ -148,23 +151,18 @@ export default function Home() {
         }
     }, []);
 
-    // 3. Create Graph API
     const fetchCreateGraph = useCallback(async (data: AnalyzeKeywordsOutput) => {
         setCreateStatus('idle');
         setError(null);
 
         const payload: CreateGraphInput = {
             seed_keyword: data.seed_keyword,
-            children: data.results.map(item => ({
-                keyword: item.keyword,
-                score: item.score,
-            })),
+            children: data.results.map(item => ({ keyword: item.keyword, score: item.score })),
         };
 
         try {
             const response = await axios.post<CreateGraphOutput>(
-                `${API_BASE_URL}/create`,
-                payload,
+                `${API_BASE_URL}/create`, payload,
                 { headers: { 'Content-Type': 'application/json' } }
             );
 
@@ -181,13 +179,11 @@ export default function Home() {
         }
     }, []);
 
-    // 💡 4. Show Graph API
     const fetchShowGraph = useCallback(async (seedKeyword: string) => {
         setGraphData(null);
         setError(null);
         setCreateStatus('idle');
 
-        // GETリクエストでクエリパラメータを使用
         const params = new URLSearchParams({ seed_keyword: seedKeyword });
 
         try {
@@ -221,7 +217,6 @@ export default function Home() {
             setError('Analyzeを実行するには、先にCandidate検索を実行し、結果を取得してください。');
             return;
         }
-
         const titles = candidateData.candidates.map(c => c.snippet.title);
 
         startAnalyzeTransition(() => {
@@ -234,19 +229,16 @@ export default function Home() {
             setError('Create Graphを実行するには、Analyze検索を実行し、結果を取得してください。');
             return;
         }
-
         startCreateTransition(() => {
             fetchCreateGraph(analyzeData);
         });
     };
 
-    // 💡 Show Graph ボタンクリック時の処理
     const handleShowGraph = () => {
         if (!keyword.trim()) {
             setError('グラフ表示を実行するには、検索キーワードを入力してください。');
             return;
         }
-
         startGraphTransition(() => {
             fetchShowGraph(keyword);
         });
@@ -254,115 +246,97 @@ export default function Home() {
 
 
     return (
-        <div className={styles.page}>
-            <main className={styles.main}>
-                <h1>FastAPI連携プロトタイプ (Next.js x FastAPI)</h1>
+        <Container maxWidth="md" sx={{ py: 4, minHeight: '100vh', bgcolor: '#f5f5f5' }}>
+            <Paper elevation={3} sx={{ p: { xs: 2, md: 4 }, borderRadius: 2 }}>
+
+                {/* タイトル */}
+                <Typography variant="h3" component="h1" gutterBottom sx={{ fontWeight: 'bold', color: '#0070f3' }}>
+                    kw2graph
+                </Typography>
+                <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 3 }}>
+                    キーワードに紐づく関連キーワードのグラフを生成するプロトタイプ
+                </Typography>
+
+                <Divider sx={{ mb: 4 }} />
 
                 {/* キーワード入力 */}
-                <div style={{ marginBottom: '20px' }}>
-                    <label htmlFor="keyword-input" style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
-                        検索キーワード:
-                    </label>
-                    <input
-                        id="keyword-input"
-                        type="text"
+                <Box sx={{ mb: 3 }}>
+                    <TextField
+                        fullWidth
+                        label="検索キーワード"
+                        variant="outlined"
                         value={keyword}
                         onChange={(e) => setKeyword(e.target.value)}
                         placeholder="例: 料理"
-                        style={{ padding: '10px', fontSize: '16px', minWidth: '300px', border: '1px solid #ccc', borderRadius: '4px' }}
-                        disabled={isPending}
+                        disabled={isPending || isAnalyzePending || isCreatePending || isGraphPending}
+                        InputProps={{
+                            startAdornment: <Box sx={{ mr: 1, color: 'action.active' }}>🔍</Box>,
+                        }}
                     />
-                </div>
+                </Box>
 
                 {/* ボタン群 */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '40px' }}>
-                    <button
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 4 }} useFlexGap>
+                    <Button
+                        variant="contained"
+                        color="primary"
                         onClick={handleGetCandidate}
                         disabled={isPending || !keyword.trim()}
-                        style={{
-                            padding: '10px 20px',
-                            fontSize: '16px',
-                            cursor: 'pointer',
-                            backgroundColor: isPending ? '#99d9ff' : '#0070f3',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            fontWeight: 'bold'
-                        }}
+                        startIcon={isPending ? <CircularProgress size={20} color="inherit" /> : null}
                     >
                         {isPending ? '検索中...' : 'Get Candidate'}
-                    </button>
+                    </Button>
 
-                    <button
+                    <Button
+                        variant="contained"
+                        sx={{ bgcolor: '#ff9800', '&:hover': { bgcolor: '#e68a00' } }}
                         onClick={handleAnalyze}
                         disabled={!candidateData || isAnalyzePending || isPending || isCreatePending || isGraphPending}
-                        style={{
-                            padding: '10px 20px',
-                            fontSize: '16px',
-                            cursor: 'pointer',
-                            backgroundColor: isAnalyzePending ? '#ffdd99' : '#ff9800',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            fontWeight: 'bold'
-                        }}
+                        startIcon={isAnalyzePending ? <CircularProgress size={20} color="inherit" /> : null}
                     >
                         {isAnalyzePending ? 'Analyze中...' : 'Analyze Titles'}
-                    </button>
+                    </Button>
 
-                    <button
+                    <Button
+                        variant="contained"
+                        color="success"
                         onClick={handleCreateGraph}
                         disabled={!analyzeData || isCreatePending || isPending || isAnalyzePending || isGraphPending}
-                        style={{
-                            padding: '10px 20px',
-                            fontSize: '16px',
-                            cursor: 'pointer',
-                            backgroundColor: isCreatePending ? '#a5d6a7' : '#4caf50',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            fontWeight: 'bold'
-                        }}
+                        startIcon={isCreatePending ? <CircularProgress size={20} color="inherit" /> : null}
                     >
                         {isCreatePending ? '登録中...' : 'Create Graph'}
-                    </button>
+                    </Button>
 
-                    {/* 💡 Show Graph ボタン */}
-                    <button
+                    <Button
+                        variant="contained"
+                        sx={{ bgcolor: '#0097a7', '&:hover': { bgcolor: '#007983' } }}
                         onClick={handleShowGraph}
                         disabled={!keyword.trim() || isGraphPending || isPending || isAnalyzePending || isCreatePending}
-                        style={{
-                            padding: '10px 20px',
-                            fontSize: '16px',
-                            cursor: 'pointer',
-                            backgroundColor: isGraphPending ? '#00bcd4' : '#0097a7',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            fontWeight: 'bold'
-                        }}
+                        startIcon={isGraphPending ? <CircularProgress size={20} color="inherit" /> : null}
                     >
                         {isGraphPending ? '描画中...' : 'Show Graph'}
-                    </button>
-                </div>
+                    </Button>
+                </Stack>
 
-                <hr style={{ width: '100%', margin: '40px 0', borderColor: '#eee' }} />
+                <Divider sx={{ mb: 4 }} />
 
                 {/* --- 結果表示エリア --- */}
+
+                {/* エラーメッセージ */}
+                {error && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                        <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
+                            <strong>🚨 エラーが発生しました:</strong> {error}
+                        </Typography>
+                    </Alert>
+                )}
 
                 {/* Create 結果のメッセージ表示 */}
                 <CreateResultDisplay status={createStatus} />
 
-                {/* 💡 グラフ描画エリア */}
-                {isGraphPending && <p style={{ color: '#0097a7' }}>グラフデータをFastAPIから取得中です...</p>}
-                {graphData && graphData.nodes.length > 0 && (
-                    <GraphVisualizationComponent data={graphData} />
-                )}
-                {graphData && graphData.nodes.length === 0 && !isGraphPending && (
-                    <div style={{ padding: '15px', backgroundColor: '#e0f7fa', border: '1px solid #0097a7', color: '#333', borderRadius: '4px', marginBottom: '20px' }}>
-                        <p style={{ margin: 0, fontWeight: 'bold' }}>ℹ️ グラフデータが見つかりませんでした。</p>
-                        <p style={{ margin: 0, fontSize: '0.9em' }}>キーワード「{keyword}」に関連するノードとエッジは登録されていません。</p>
-                    </div>
+                {/* グラフ描画エリア */}
+                {graphData && (
+                    <GraphVisualizationComponent data={graphData} isGraphPending={isGraphPending} keyword={keyword} />
                 )}
 
                 {/* Analyze結果の表示 */}
@@ -375,22 +349,14 @@ export default function Home() {
                     <CandidateResultDisplay data={candidateData} />
                 )}
 
-                {/* エラー表示は一番下に */}
-                {error && (
-                    <div style={{ color: 'white', backgroundColor: '#e33e3e', border: '1px solid #a00', padding: '15px', borderRadius: '5px', marginTop: '20px' }}>
-                        <strong>🚨 エラーが発生しました:</strong>
-                        <pre style={{ whiteSpace: 'pre-wrap', margin: '5px 0 0 0', fontSize: '14px' }}>
-                {error}
-            </pre>
-                    </div>
-                )}
-            </main>
-        </div>
+            </Paper>
+        </Container>
     );
 }
 
+
 // ----------------------------------------
-// Create 結果表示コンポーネント (変更なし)
+// Create 結果表示コンポーネント (MUI対応)
 // ----------------------------------------
 interface CreateResultDisplayProps {
     status: 'idle' | 'success' | 'failure';
@@ -399,33 +365,19 @@ interface CreateResultDisplayProps {
 const CreateResultDisplay: React.FC<CreateResultDisplayProps> = ({ status }) => {
     if (status === 'success') {
         return (
-            <div style={{
-                padding: '15px',
-                backgroundColor: '#e8f5e9',
-                border: '1px solid #4caf50',
-                color: '#333',
-                borderRadius: '4px',
-                marginBottom: '20px'
-            }}>
-                <p style={{ margin: 0, fontWeight: 'bold' }}>🎉 登録成功!</p>
-                <p style={{ margin: 0, fontSize: '0.9em' }}>グラフ作成リクエストが FastAPI によって正常に処理されました。</p>
-            </div>
+            <Alert severity="success" sx={{ mb: 2 }}>
+                <Typography component="p" sx={{ fontWeight: 'bold' }}>🎉 登録成功!</Typography>
+                <Typography variant="body2">グラフ作成リクエストが FastAPI によって正常に処理されました。</Typography>
+            </Alert>
         );
     }
 
     if (status === 'failure') {
         return (
-            <div style={{
-                padding: '15px',
-                backgroundColor: '#ffebee',
-                border: '1px solid #f44336',
-                color: '#f44336',
-                borderRadius: '4px',
-                marginBottom: '20px'
-            }}>
-                <p style={{ margin: 0, fontWeight: 'bold' }}>❌ 登録失敗</p>
-                <p style={{ margin: 0, fontSize: '0.9em' }}>詳細については、画面下部のエラーメッセージを確認してください。</p>
-            </div>
+            <Alert severity="error" sx={{ mb: 2 }}>
+                <Typography component="p" sx={{ fontWeight: 'bold' }}>❌ 登録失敗</Typography>
+                <Typography variant="body2">詳細については、画面下部のエラーメッセージを確認してください。</Typography>
+            </Alert>
         );
     }
 
@@ -434,7 +386,7 @@ const CreateResultDisplay: React.FC<CreateResultDisplayProps> = ({ status }) => 
 
 
 // ----------------------------------------
-// Analyze結果表示コンポーネント (修正済み)
+// Analyze結果表示コンポーネント (MUI対応 & デザイン修正)
 // ----------------------------------------
 
 interface AnalyzeResultDisplayProps {
@@ -444,53 +396,61 @@ interface AnalyzeResultDisplayProps {
 const AnalyzeResultDisplay: React.FC<AnalyzeResultDisplayProps> = ({ data }) => {
     if (!data.results || data.results.length === 0) {
         return (
-            <div style={{ padding: '20px', backgroundColor: '#fffbe6', border: '1px solid #ffcc00', borderRadius: '5px', color: '#333' }}>
-                <p>🔍 キーワード「{data.seed_keyword}」に対する分析結果は見つかりませんでした。</p>
-            </div>
+            <Alert severity="warning" sx={{ my: 2 }}>
+                🔍 キーワード「{data.seed_keyword}」に対する分析結果は見つかりませんでした。
+            </Alert>
         );
     }
 
     return (
-        <div style={{
-            width: '100%',
-            maxWidth: '800px',
-            margin: '20px auto 40px auto',
-            padding: '20px',
-            backgroundColor: '#fff3e0',
-            border: '2px solid #ff9800',
-            borderRadius: '8px',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-            color: '#333'
+        <Paper elevation={1} sx={{
+            p: 3,
+            bgcolor: '#fff8e1',
+            borderLeft: '5px solid #ff9800',
+            my: 3
         }}>
-            <h3 style={{ color: '#333' }}>📊 キーワード分析結果 (シードキーワード: {data.seed_keyword})</h3>
+            <Typography variant="h6" component="h3" sx={{ mb: 2, fontWeight: 'bold', color: '#333' }}>
+                📊 キーワード分析結果 (シードキーワード: {data.seed_keyword})
+            </Typography>
 
-            <ul style={{ listStyle: 'none', padding: 0 }}>
+            <List disablePadding>
                 {data.results
                     .sort((a, b) => b.score - a.score)
                     .map((item, index) => (
-                        <li
+                        <ListItem
                             key={item.keyword}
-                            style={{
-                                display: 'flex',
+                            divider
+                            disableGutters
+                            sx={{
                                 justifyContent: 'space-between',
-                                padding: '10px 0',
-                                borderBottom: '1px dashed #ffd740',
-                                color: '#333'
+                                py: 1.5,
+                                '&:last-child': { borderBottom: 'none' }
                             }}
                         >
-                            <span style={{ fontWeight: 'bold' }}>{index + 1}. {item.keyword}</span>
-                            <span style={{ color: item.score > 0.7 ? '#d32f2f' : '#ff9800', fontWeight: 'bold' }}>
-                           スコア: {item.score.toFixed(3)}
-                        </span>
-                        </li>
+                            <Typography sx={{ fontWeight: 'bold', color: '#333' }}>
+                                {index + 1}. {item.keyword}
+                            </Typography>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                                <Typography variant="body2" color="text.secondary">スコア:</Typography>
+                                <Chip
+                                    label={item.score.toFixed(3)}
+                                    size="small"
+                                    sx={{
+                                        fontWeight: 'bold',
+                                        bgcolor: item.score > 0.7 ? '#d32f2f' : '#ff9800',
+                                        color: 'white'
+                                    }}
+                                />
+                            </Stack>
+                        </ListItem>
                     ))}
-            </ul>
-        </div>
+            </List>
+        </Paper>
     );
 };
 
 // ----------------------------------------
-// Candidate結果表示コンポーネント (修正済み)
+// Candidate結果表示コンポーネント (MUI対応 & デザイン修正)
 // ----------------------------------------
 
 interface CandidateResultDisplayProps {
@@ -500,85 +460,91 @@ interface CandidateResultDisplayProps {
 const CandidateResultDisplay: React.FC<CandidateResultDisplayProps> = ({ data }) => {
     if (!data.candidates || data.candidates.length === 0) {
         return (
-            <div style={{ padding: '20px', backgroundColor: '#fffbe6', border: '1px solid #ffcc00', borderRadius: '5px', color: '#333' }}>
-                <p>🔍 キーワード「{data.seed_keyword}」に対する候補は見つかりませんでした。</p>
-            </div>
+            <Alert severity="info" sx={{ my: 2 }}>
+                🔍 キーワード「{data.seed_keyword}」に対する候補は見つかりませんでした。
+            </Alert>
         );
     }
 
     return (
-        <div style={{ width: '100%', maxWidth: '800px', margin: '20px auto 0 auto' }}>
-            <h2 style={{ color: '#333' }}>✅ Candidate 検索結果</h2>
+        <Paper elevation={1} sx={{ p: 3, bgcolor: '#e8f5e9', borderLeft: '5px solid #4caf50', my: 3 }}>
+            <Typography variant="h6" component="h3" sx={{ mb: 2, fontWeight: 'bold', color: '#333' }}>
+                ✅ Candidate 検索結果
+            </Typography>
 
-            <div style={{ marginBottom: '15px', padding: '10px', backgroundColor: '#e8f5e9', borderLeft: '5px solid #4caf50' }}>
-                <p style={{ margin: 0, color: '#333' }}>
-                    リクエストキーワード: <span style={{ fontWeight: 'bold' }}>{data.seed_keyword}</span> (全 {data.candidates.length} 件)
-                </p>
-            </div>
+            <Box sx={{ mb: 2, p: 1, bgcolor: '#f1f8e9', borderRadius: 1 }}>
+                <Typography variant="body1" sx={{ color: '#333' }}>
+                    リクエストキーワード: <Box component="span" sx={{ fontWeight: 'bold' }}>{data.seed_keyword}</Box> (全 {data.candidates.length} 件)
+                </Typography>
+            </Box>
 
-            <ul style={{ listStyle: 'none', padding: 0 }}>
+            <List disablePadding>
                 {data.candidates.map((candidate, index) => (
-                    <li
+                    <ListItem
                         key={candidate.videoId}
-                        style={{
-                            padding: '12px 15px',
-                            marginBottom: '8px',
-                            backgroundColor: '#ffffff',
-                            border: '1px solid #ddd',
-                            borderRadius: '4px',
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                            display: 'flex',
+                        disableGutters
+                        sx={{
+                            py: 1,
+                            borderBottom: '1px solid #eee',
                             alignItems: 'flex-start',
-                            color: '#333'
+                            '&:last-child': { borderBottom: 'none' }
                         }}
                     >
-                        <span style={{
-                            fontWeight: 'bold',
-                            marginRight: '10px',
-                            color: '#0070f3',
-                            fontSize: '1.1em'
-                        }}>
-                            {index + 1}.
-                        </span>
-                        <a
-                            href={`https://www.youtube.com/watch?v=${candidate.videoId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                                color: '#1a0dab',
-                                textDecoration: 'none',
-                                flexGrow: 1
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.textDecoration = 'underline'}
-                            onMouseLeave={(e) => e.currentTarget.style.textDecoration = 'none'}
-                        >
-                            {candidate.snippet.title}
-                        </a>
-                    </li>
+                        <Grid container spacing={1}>
+                            <Grid item xs={1}>
+                                <Typography sx={{ fontWeight: 'bold', color: 'primary.main', fontSize: '1.1em' }}>
+                                    {index + 1}.
+                                </Typography>
+                            </Grid>
+                            <Grid item xs={11}>
+                                <Typography
+                                    component="a"
+                                    href={`https://www.youtube.com/watch?v=${candidate.videoId}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    sx={{
+                                        color: 'info.main',
+                                        textDecoration: 'none',
+                                        '&:hover': { textDecoration: 'underline' }
+                                    }}
+                                >
+                                    {candidate.snippet.title}
+                                </Typography>
+                            </Grid>
+                        </Grid>
+                    </ListItem>
                 ))}
-            </ul>
-        </div>
+            </List>
+        </Paper>
     );
 };
 
 
 // ----------------------------------------
-// 💡 グラフ描画コンポーネント
+// グラフ描画コンポーネント
 // ----------------------------------------
 
 interface GraphVisualizationComponentProps {
     data: ShowGraphOutput;
+    isGraphPending: boolean;
+    keyword: string;
 }
 
-const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = ({ data }) => {
+const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = ({ data, isGraphPending, keyword }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [isVisLoaded, setIsVisLoaded] = useState(false);
 
-    // 💡 vis.js の CDN ロード
+    // vis.js の CDN ロード
     useEffect(() => {
         const scriptId = 'vis-js-script';
-        // スクリプトが既に存在するかチェック
-        if (!(window as any).vis && !document.getElementById(scriptId)) {
+        const win = window as any;
+
+        if (win.vis) {
+            setIsVisLoaded(true);
+            return;
+        }
+
+        if (!document.getElementById(scriptId)) {
             const script = document.createElement('script');
             script.src = 'https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js';
             script.async = true;
@@ -590,29 +556,25 @@ const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = 
             styleLink.rel = 'stylesheet';
             styleLink.href = 'https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css';
             document.head.appendChild(styleLink);
-        } else if ((window as any).vis) {
-            setIsVisLoaded(true);
         }
     }, []);
 
-    // 💡 グラフ描画ロジック
+    // グラフ描画ロジック
     useEffect(() => {
-        if (!isVisLoaded || !containerRef.current || data.nodes.length === 0) {
+        if (!isVisLoaded || !containerRef.current || data.nodes.length === 0 || isGraphPending) {
             return;
         }
 
         const vis = (window as any).vis;
-        if (!vis) return; // vis.js がロードされていない場合は中断
+        if (!vis) return;
 
-        // 1. vis.js のデータ形式に変換
-        // FastAPIの 'from_node', 'to_node' を vis.js の 'from', 'to' にマッピング
         const nodes = new vis.DataSet(data.nodes);
-        const edges = new vis.DataSet(data.edges.map(edge => ({
+        const edges = new vis.DataSet(data.edges.map((edge: GraphEdge) => ({
             id: edge.id,
             from: edge.from_node,
             to: edge.to_node,
-            value: edge.score * 10, // スコアをエッジの太さに使う (可視化のためスケーリング)
-            title: `Score: ${edge.score.toFixed(3)}` // ホバー表示
+            value: edge.score * 10,
+            title: `Score: ${edge.score.toFixed(3)}`
         })));
 
         const graphData = { nodes, edges };
@@ -620,78 +582,72 @@ const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = 
             nodes: {
                 shape: 'dot',
                 size: 20,
-                font: {
-                    size: 14,
-                    color: '#333'
-                },
+                font: { size: 14, color: '#333' },
                 borderWidth: 2
             },
             edges: {
                 width: 2,
                 arrows: 'to',
                 color: { inherit: 'from' },
-                smooth: {
-                    type: 'continuous'
-                }
+                smooth: { type: 'continuous' }
             },
-            // キーワードのグルーピングに合わせて色分け
             groups: {
                 seed: { color: { background: '#FFC107', border: '#FF9800' }, size: 30 },
                 related: { color: { background: '#2196F3', border: '#1976D2' } },
-                // 他のグループがあればここに追加
             },
             physics: {
                 enabled: true,
-                barnesHut: {
-                    gravitationalConstant: -2000,
-                    centralGravity: 0.3,
-                    springLength: 95,
-                    springConstant: 0.04,
-                    damping: 0.09,
-                    avoidOverlap: 0.5
-                },
+                barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 95, springConstant: 0.04, damping: 0.09, avoidOverlap: 0.5 },
                 solver: 'barnesHut',
-                stabilization: {
-                    enabled: true,
-                    iterations: 2500,
-                    updateInterval: 25
-                }
+                stabilization: { enabled: true, iterations: 2500, updateInterval: 25 }
             },
             height: '500px'
         };
 
-        // 2. ネットワーク描画
         const network = new vis.Network(containerRef.current, graphData, options);
 
-        // クリーンアップ関数
-        return () => {
-            network.destroy();
-        };
-    }, [isVisLoaded, data]);
+        // クリーンアップ
+        return () => { network.destroy(); };
+    }, [isVisLoaded, data, isGraphPending]);
 
-    if (!isVisLoaded) {
-        return <p style={{ color: '#333' }}>グラフ描画ライブラリをロード中です...</p>;
+    // グラフの描画を待機中の場合は CircularProgress を表示
+    if (isGraphPending) {
+        return (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '500px', my: 3 }}>
+                <CircularProgress />
+                <Typography variant="body1" sx={{ ml: 2, color: 'text.secondary' }}>グラフデータをFastAPIから取得・描画中です...</Typography>
+            </Box>
+        );
     }
 
+    // グラフデータがない場合の表示
+    if (data.nodes.length === 0) {
+        return (
+            <Alert severity="info" sx={{ my: 2 }}>
+                ℹ️ キーワード「{keyword}」に関連するグラフデータが見つかりませんでした。Create Graphを実行済みか確認してください。
+            </Alert>
+        );
+    }
+
+    // グラフコンポーネント本体
     return (
-        <div style={{ width: '100%', maxWidth: '800px', margin: '20px auto', color: '#333' }}>
-            <h2 style={{ color: '#333' }}>📈 グラフ表示</h2>
-            <div
+        <Paper elevation={3} sx={{ p: 3, my: 3 }}>
+            <Typography variant="h6" component="h3" sx={{ mb: 2, fontWeight: 'bold' }}>
+                📈 グラフ表示 ({data.nodes.length} ノード / {data.edges.length} エッジ)
+            </Typography>
+            <Box
                 ref={containerRef}
-                style={{
+                sx={{
                     width: '100%',
                     height: '500px',
                     border: '1px solid #ddd',
                     borderRadius: '8px',
-                    backgroundColor: '#f5f5f5' // グラフ背景を灰色で明確に
+                    bgcolor: '#ffffff'
                 }}
-            >
-                {/* グラフがここに描画されます */}
-                {data.nodes.length === 0 && <p style={{ textAlign: 'center', paddingTop: '200px', color: '#666' }}>表示するグラフデータがありません。</p>}
-            </div>
-            <p style={{ fontSize: '0.9em', color: '#666', marginTop: '10px' }}>ノードをドラッグしてレイアウトを変更できます。エッジの太さは関連度スコアを表します。</p>
-        </div>
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                ノードをドラッグしてレイアウトを変更できます。エッジの太さは関連度スコアを表します。
+            </Typography>
+        </Paper>
     );
 };
-
-// ... (残りのコンポーネント定義)
