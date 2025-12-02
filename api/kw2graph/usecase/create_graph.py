@@ -10,5 +10,5 @@ class CreateGraphUseCase(UseCaseBase):
         super().__init__(settings)
         self.creator = GraphCreatorService(settings)
 
-    def execute(self, in_data: CreateGraphInput) -> CreateGraphOutput:
-        return self.creator.create(in_data)
+    async def execute(self, in_data: CreateGraphInput) -> CreateGraphOutput:
+        return await self.creator.create(in_data)

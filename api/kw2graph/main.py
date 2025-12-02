@@ -18,6 +18,7 @@ from kw2graph.usecase.input.create_graph import CreateGraphInput
 from kw2graph.usecase.output.analyze import AnalyzeKeywordsOutput
 from kw2graph.usecase.output.candidate import GetCandidateOutput
 from kw2graph.usecase.output.create_graph import CreateGraphOutput
+from kw2graph.usecase.show_graph import ShowGraphInput, ShowGraphUseCase, ShowGraphOutput
 
 logger = structlog.get_logger(__name__)
 
@@ -61,7 +62,23 @@ async def analyze(request: AnalyzeKeywordsInput):
 @app.post('/create', response_model=CreateGraphOutput)
 async def create_graph(request: CreateGraphInput):
     use_case = CreateGraphUseCase(settings)
-    response = use_case.execute(request)
+    response = await use_case.execute(request)
+    return response
+
+
+@app.get('/show_graph', response_model=ShowGraphOutput)
+async def show_graph(seed_keyword: str):
+    """
+    指定されたキーワードを起点とする関連グラフデータを取得する。
+    """
+    # GETリクエストのため、クエリパラメータからInputを作成
+    request = ShowGraphInput(seed_keyword=seed_keyword)
+
+    use_case = ShowGraphUseCase(settings)
+
+    # ユースケースを実行
+    response = await use_case.execute(request)
+
     return response
 
 

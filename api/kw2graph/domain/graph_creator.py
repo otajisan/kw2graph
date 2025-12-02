@@ -9,7 +9,7 @@ class GraphCreatorService(ServiceBase):
         super().__init__(settings)
         self.repo = GraphDatabaseRepository(settings)
 
-    def create(self, in_data: CreateGraphInput) -> CreateGraphOutput:
+    async def create(self, in_data: CreateGraphInput) -> CreateGraphOutput:
         children = [item.model_dump() for item in in_data.children]
-        result = self.repo.register_related_keywords(in_data.seed_keyword, children)
+        result = await self.repo.register_related_keywords(in_data.seed_keyword, children)
         return CreateGraphOutput(result=result)

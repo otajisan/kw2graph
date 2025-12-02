@@ -9,7 +9,7 @@ logger = structlog.get_logger(__name__)
 
 
 class ElasticsearchRepository(RepositoryBase):
-    RESULTS_SIZE = 5
+    RESULTS_SIZE = 10
 
     def __init__(self, settings: config.Settings):
         super().__init__(settings)
