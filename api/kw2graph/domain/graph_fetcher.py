@@ -1,5 +1,9 @@
+import structlog
+
 from kw2graph.domain.base import ServiceBase
 from kw2graph.infrastructure.graphdb import GraphDatabaseRepository, GraphData
+
+logger = structlog.get_logger(__name__)
 
 
 class GraphFetcherService(ServiceBase):
@@ -12,4 +16,8 @@ class GraphFetcherService(ServiceBase):
         グラフリポジトリから関連グラフデータを取得する。
         """
         # 現在、特別なドメインロジックはないため、リポジトリを直接呼び出す
-        return await self.repo.fetch_related_graph(seed_keyword)
+        response = await self.repo.fetch_related_graph(seed_keyword)
+
+        logger.info(f"fetch {seed_keyword} result: {response}")
+
+        return response

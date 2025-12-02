@@ -130,57 +130,71 @@ class GraphDatabaseRepository(RepositoryBase):
             return False
 
     async def fetch_related_graph(self, seed_keyword: str) -> GraphData:
-        """
-        特定のキーワードを起点とするグラフデータ（ノードとエッジ）を取得します。
-
-        :param seed_keyword: グラフの中心となるキーワード
-        :return: ノードとエッジのリストを含む辞書
-        """
         logger.info("Fetching graph data.", seed_keyword=seed_keyword)
 
-        # 1. グラフデータ取得クエリ (Gremlin)
-        # 実行結果は、ノードとエッジオブジェクトを含むリストになります。
-        # 特定のキーワードノードから2ホップ以内のノードとそのエッジを取得するクエリ
-        query = (
+        # 1. 接続ノード（Vertex）の取得クエリ
+        # 始点ノードとその関連ノードをすべて取得し、ノードIDとプロパティを抽出
+        nodes_query = (
+            f"g.V().has('{self.NODE_LABEL}', 'name', '{seed_keyword}').as('start')."
+            f"union(identity(), both('{self.EDGE_LABEL}'))."  # 起点ノード自身と、両方向に繋がるノードを取得
+            f"dedup()."
+            f"project('id', 'name')."
+            f"by(id())."
+            f"by(coalesce(values('name'), constant('')))."
+            f"toList()"
+        )
+
+        # 2. エッジ（Edge）の取得クエリ
+        # 始点ノードから出る/入るエッジを取得し、接続情報とスコアを抽出
+        edges_query = (
             f"g.V().has('{self.NODE_LABEL}', 'name', '{seed_keyword}')."
-            f"union("
-            f"  identity().valueMap(true).as('nodes'),"  # 自身をノードとして取得
-            f"  bothE('{self.EDGE_LABEL}').as('edges').valueMap(true),"  # エッジを取得
-            f"  bothV().as('nodes').valueMap(true)"  # 接続ノードをノードとして取得
-            f").toList()"
+            f"bothE('{self.EDGE_LABEL}').dedup()."
+            f"project('id', 'score', 'from_id', 'to_id')."
+            f"by(id())."
+            f"by(coalesce(values('score'), constant(0.0)))."
+            f"by(__.outV().id())."  # ここで outV().id() が実行されるのはエッジに対してなので安全
+            f"by(__.inV().id())."
+            f"toList()"
         )
 
         try:
-            raw_results = await self._execute_gremlin(query)
+            # 3. 実行
+            raw_nodes = await self._execute_gremlin(nodes_query)
+            raw_edges = await self._execute_gremlin(edges_query)
         except Exception as e:
-            logger.error("Failed to fetch graph data from Gremlin.", error=str(e))
+            logger.error("Failed to fetch graph data from Gremlin (Split Query).", error=str(e))
             return {"nodes": [], "edges": []}
 
-        # 2. 結果の整形（画面表示用）
+        # 4. 結果の整形（Python側で結合）
         nodes = {}
         edges = []
 
-        for item in raw_results:
-            # Gremlinの結果は複雑な形式なので、ここでは 'TinkerGraph' のデフォルト出力を想定してシンプルに処理します。
-            # 実際には、ノードIDをキーとして、重複を排除しながらノードとエッジをリスト化します。
-            if item and isinstance(item, dict):
-                # ノード情報の抽出 (ノードIDをキーとして重複排除)
-                if item.get('label') == self.NODE_LABEL:
-                    node_id = item.get('id')
-                    if node_id not in nodes:
-                        nodes[node_id] = {
-                            "id": node_id,
-                            "label": item.get('name', [''])[0],  # TinkerPopはプロパティをリストで返す
-                            "group": self.NODE_LABEL
-                        }
+        for item in raw_nodes:  # ノード情報の整形
+            node_id = str(item.get('id'))  # ★ 修正: IDを文字列にキャスト
+            if node_id not in nodes:
+                nodes[node_id] = {
+                    "id": node_id,
+                    "label": item.get('name'),
+                    "group": self.NODE_LABEL
+                }
 
-                # エッジ情報の抽出
-                elif item.get('label') == self.EDGE_LABEL:
-                    edges.append({
-                        "id": item.get('id'),
-                        "from": item.get('IN_ID'),  # Gremlinの結果から取得
-                        "to": item.get('OUT_ID'),  # Gremlinの結果から取得
-                        "score": item.get('score', [0.0])[0]
-                    })
+        # エッジの整形
+        for item in raw_edges:
+            score_value = item.get('score')
+
+            # BigDecimalをfloatに変換するロジック
+            if hasattr(score_value, 'unscaled_value') and hasattr(score_value, 'scale'):
+                # GremlinのBigDecimalオブジェクトの場合
+                score_float = float(score_value.unscaled_value) / (10 ** score_value.scale)
+            else:
+                # すでにfloatまたはintの場合
+                score_float = float(score_value)
+
+            edges.append({
+                "id": str(item.get('id')),  # ★ 修正: IDを文字列にキャスト
+                "from_node": str(item.get('from_id')),  # ★ 修正: IDを文字列にキャスト
+                "to_node": str(item.get('to_id')),  # ★ 修正: IDを文字列にキャスト
+                "score": score_float  # ★ 修正: floatに変換した値を格納
+            })
 
         return {"nodes": list(nodes.values()), "edges": edges}

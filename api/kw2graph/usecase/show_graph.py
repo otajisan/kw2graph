@@ -21,10 +21,9 @@ class Node(OutputBase):
 
 class Edge(OutputBase):
     id: str
-    from_node: str = Field(alias='from')  # グラフ描画ライブラリと合わせるため別名定義
-    to_node: str = Field(alias='to')
+    from_node: str # キー名を Gremlin の出力に合わせて from_node に統一
+    to_node: str   # キー名を Gremlin の出力に合わせて to_node に統一
     score: float
-
 
 class ShowGraphOutput(OutputBase):
     nodes: List[Node]
