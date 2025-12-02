@@ -9,6 +9,8 @@ logger = structlog.get_logger(__name__)
 
 
 class ElasticsearchRepository(RepositoryBase):
+    RESULTS_SIZE = 5
+
     def __init__(self, settings: config.Settings):
         super().__init__(settings)
         logger.info("Initializing ElasticsearchClient", es_host=settings.es_host)
@@ -29,7 +31,7 @@ class ElasticsearchRepository(RepositoryBase):
         response = self.client.search(
             index=index,
             query=query_dsl,
-            size=50,
+            size=self.RESULTS_SIZE,
             sort=[
                 {"_score": {"order": "desc"}}
             ]

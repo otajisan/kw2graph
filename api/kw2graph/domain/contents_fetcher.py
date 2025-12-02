@@ -1,4 +1,5 @@
 import structlog
+from elastic_transport import ObjectApiResponse
 
 from kw2graph import config
 from kw2graph.infrastructure.elasticsearch import ElasticsearchRepository
@@ -19,13 +20,14 @@ class ContentsFetcherService(ServiceBase):
         response = self.es_repo.search(in_data.index, in_data.field, in_data.keyword)
         logger.info(f"Found {len(response['hits'])} candidates")
 
-        return self.parse_response(response)
+        return self.parse_response(seed_keyword=in_data.keyword, response=response)
 
     @staticmethod
-    def parse_response(response) -> GetCandidateOutput:
+    def parse_response(seed_keyword: str, response: ObjectApiResponse) -> GetCandidateOutput:
         candidates = []
         for hit in response['hits']['hits']:
             source = hit['_source']
             candidates.append(source)
 
-        return GetCandidateOutput(candidates=candidates)
+        logger.debug(f"candidates: {candidates}")
+        return GetCandidateOutput(seed_keyword=seed_keyword, candidates=candidates)

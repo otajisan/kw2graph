@@ -9,4 +9,5 @@ class AnalyzeKeywordsOutputItem(OutputBase):
 
 
 class AnalyzeKeywordsOutput(OutputBase):
+    seed_keyword: str
     results: List[AnalyzeKeywordsOutputItem]

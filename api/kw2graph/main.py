@@ -6,6 +6,7 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.cors import CORSMiddleware
 
 from kw2graph import settings
 from kw2graph.usecase.analyze import AnalyzeKeywordsUseCase
@@ -19,20 +20,35 @@ logger = structlog.get_logger(__name__)
 
 app = FastAPI(default_response_class=JSONResponse)
 
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # 許可するオリジンのリスト
+    allow_credentials=True,  # クッキーなどの資格情報を許可
+    allow_methods=["*"],  # すべてのHTTPメソッド (POST, GET, PUT, DELETEなど) を許可
+    allow_headers=["*"],  # すべてのHTTPヘッダーを許可 (Content-Typeなど)
+)
+
 
 @app.get("/healthz")
 async def healthz():
     return {'status': 'UP'}
 
 
-@app.get('/candidate', response_model=GetCandidateOutput)
+@app.post('/candidate', response_model=GetCandidateOutput)
 async def get_candidate(request: GetCandidateInput):
     use_case = GetCandidateUseCase(settings)
     response = use_case.execute(request)
     return response
 
 
-@app.get('/analyze', response_model=AnalyzeKeywordsOutput)
+@app.post('/analyze', response_model=AnalyzeKeywordsOutput)
 async def analyze(request: AnalyzeKeywordsInput):
     use_case = AnalyzeKeywordsUseCase(settings)
     response = use_case.execute(request)
@@ -57,8 +73,7 @@ async def handle_http_exception(request, exc):
 @app.middleware("http")
 async def intercept_http_requests(req, call_next):
     res = await call_next(req)
-
-    logger.info(f'{res.status_code} {req.method}: {req.url.path} query: {req.query_params}')
+    logger.info(f'{req.method}: {req.url.path} query: {req.query_params} headers: {req.headers}')
 
     return res
 
