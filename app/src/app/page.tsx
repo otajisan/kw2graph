@@ -4,7 +4,6 @@ import React, { useState, useCallback, useTransition, useEffect, useRef } from '
 import axios, { AxiosError } from 'axios';
 
 // Material UI のコンポーネントをインポート
-// 💡 @mui/material-nextjs の利用には、このコアパッケージのインポートが必要です
 import {
     Box,
     Button,
@@ -26,63 +25,26 @@ import {
 const API_BASE_URL = 'http://localhost:8000';
 
 // --- 型定義 ---
-
-// Candidate API 応答
-interface Candidate {
-    videoId: string;
-    snippet: {
-        title: string;
-    };
-}
-interface CandidateResponse {
-    seed_keyword: string;
-    candidates: Candidate[];
-}
-
-// Analyze API 応答 (Python: AnalyzeKeywordsOutput)
-interface AnalyzeKeywordsOutputItem {
-    keyword: string;
-    score: number;
-}
-interface AnalyzeKeywordsOutput {
-    seed_keyword: string;
-    results: AnalyzeKeywordsOutputItem[];
-}
-
-// Create Graph API 応答 (Python: CreateGraphOutput)
-interface CreateGraphOutput {
-    result: boolean;
-}
-
-// Create Graph API リクエスト (Python: CreateGraphInput)
-interface CreateGraphInput {
-    seed_keyword: string;
-    children: { keyword: string; score: number }[];
-}
-
-// Show Graph API 応答 (Python: ShowGraphOutput)
-interface GraphNode {
-    id: string;
-    label: string;
-    group: string;
-}
-
-interface GraphEdge {
-    id: string;
-    from_node: string;
-    to_node: string;
-    score: number;
-}
-interface ShowGraphOutput {
-    nodes: GraphNode[];
-    edges: GraphEdge[];
-}
+// (中略 - 変更なし)
+interface Candidate { videoId: string; snippet: { title: string; }; }
+interface CandidateResponse { seed_keyword: string; candidates: Candidate[]; }
+interface AnalyzeKeywordsOutputItem { keyword: string; score: number; }
+interface AnalyzeKeywordsOutput { seed_keyword: string; results: AnalyzeKeywordsOutputItem[]; }
+interface CreateGraphOutput { result: boolean; }
+interface CreateGraphInput { seed_keyword: string; children: { keyword: string; score: number }[]; }
+interface GraphNode { id: string; label: string; group: string; }
+interface GraphEdge { id: string; from_node: string; to_node: string; score: number; }
+interface ShowGraphOutput { nodes: GraphNode[]; edges: GraphEdge[]; }
+// --- 型定義 終わり ---
 
 
 // --- メインコンポーネント ---
 
 export default function Home() {
     const [keyword, setKeyword] = useState<string>('');
+    // 💡 maxDepth State を追加 (デフォルト値 2 に対応)
+    const [maxDepth, setMaxDepth] = useState<number>(2);
+
     const [candidateData, setCandidateData] = useState<CandidateResponse | null>(null);
     const [analyzeData, setAnalyzeData] = useState<AnalyzeKeywordsOutput | null>(null);
     const [graphData, setGraphData] = useState<ShowGraphOutput | null>(null);
@@ -98,7 +60,7 @@ export default function Home() {
 
 
     // --- API関数群 ---
-
+    // (handleAxiosError は省略 - 変更なし)
     const handleAxiosError = (err: unknown, apiName: string) => {
         if (axios.isAxiosError(err)) {
             const axiosError = err as AxiosError;
@@ -112,6 +74,7 @@ export default function Home() {
         console.error(`Axios Error (${apiName}):`, err);
     };
 
+    // fetchCandidate (省略 - 変更なし)
     const fetchCandidate = useCallback(async (kw: string) => {
         setError(null);
         setCandidateData(null);
@@ -132,6 +95,7 @@ export default function Home() {
         }
     }, []);
 
+    // fetchAnalyze (省略 - 変更なし)
     const fetchAnalyze = useCallback(async (seedKeyword: string, titles: string[]) => {
         setAnalyzeData(null);
         setGraphData(null);
@@ -151,6 +115,7 @@ export default function Home() {
         }
     }, []);
 
+    // fetchCreateGraph (省略 - 変更なし)
     const fetchCreateGraph = useCallback(async (data: AnalyzeKeywordsOutput) => {
         setCreateStatus('idle');
         setError(null);
@@ -179,12 +144,17 @@ export default function Home() {
         }
     }, []);
 
-    const fetchShowGraph = useCallback(async (seedKeyword: string) => {
+    // 💡 Show Graph API のロジックを修正
+    const fetchShowGraph = useCallback(async (seedKeyword: string, depth: number) => {
         setGraphData(null);
         setError(null);
         setCreateStatus('idle');
 
-        const params = new URLSearchParams({ seed_keyword: seedKeyword });
+        // 💡 クエリパラメータに max_depth を追加
+        const params = new URLSearchParams({
+            seed_keyword: seedKeyword,
+            max_depth: depth.toString(),
+        });
 
         try {
             const response = await axios.get<ShowGraphOutput>(
@@ -201,7 +171,7 @@ export default function Home() {
 
 
     // --- イベントハンドラ ---
-
+    // (handleGetCandidate, handleAnalyze, handleCreateGraph は省略 - 変更なし)
     const handleGetCandidate = () => {
         if (!keyword.trim()) {
             setError('キーワードを入力してください。');
@@ -234,14 +204,29 @@ export default function Home() {
         });
     };
 
+    // 💡 Show Graph ボタンクリック時の処理を修正
     const handleShowGraph = () => {
         if (!keyword.trim()) {
             setError('グラフ表示を実行するには、検索キーワードを入力してください。');
             return;
         }
+
         startGraphTransition(() => {
-            fetchShowGraph(keyword);
+            // 💡 maxDepth の値を渡す
+            fetchShowGraph(keyword, maxDepth);
         });
+    };
+
+    // 💡 maxDepth の入力変更ハンドラ
+    const handleMaxDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = parseInt(e.target.value, 10);
+        // 0以上の整数に限定
+        if (!isNaN(value) && value >= 0) {
+            setMaxDepth(value);
+        } else if (e.target.value === '') {
+            // 入力が空の場合は0として扱う（またはFastAPIのデフォルト値に依存）
+            setMaxDepth(0);
+        }
     };
 
 
@@ -254,29 +239,45 @@ export default function Home() {
                     kw2graph
                 </Typography>
                 <Typography variant="subtitle1" color="text.secondary" sx={{ mb: 3 }}>
-                    キーワードに紐づく関連キーワードのグラフを生成するプロトタイプ
+                    Next.js (MUI) と FastAPI (Python) 連携プロトタイプ
                 </Typography>
 
                 <Divider sx={{ mb: 4 }} />
 
-                {/* キーワード入力 */}
-                <Box sx={{ mb: 3 }}>
-                    <TextField
-                        fullWidth
-                        label="検索キーワード"
-                        variant="outlined"
-                        value={keyword}
-                        onChange={(e) => setKeyword(e.target.value)}
-                        placeholder="例: 料理"
-                        disabled={isPending || isAnalyzePending || isCreatePending || isGraphPending}
-                        InputProps={{
-                            startAdornment: <Box sx={{ mr: 1, color: 'action.active' }}>🔍</Box>,
-                        }}
-                    />
-                </Box>
+                {/* 💡 キーワード入力と深さの入力フィールドを並べる */}
+                <Grid container spacing={2} sx={{ mb: 3 }}>
+                    <Grid item xs={12} sm={9}>
+                        <TextField
+                            fullWidth
+                            label="検索キーワード (グラフの起点)"
+                            variant="outlined"
+                            value={keyword}
+                            onChange={(e) => setKeyword(e.target.value)}
+                            placeholder="例: 料理"
+                            disabled={isPending || isAnalyzePending || isCreatePending || isGraphPending}
+                            InputProps={{
+                                startAdornment: <Box sx={{ mr: 1, color: 'action.active' }}>🔍</Box>,
+                            }}
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                        <TextField
+                            fullWidth
+                            label="最大深さ (max_depth)"
+                            variant="outlined"
+                            type="number"
+                            value={maxDepth}
+                            onChange={handleMaxDepthChange}
+                            inputProps={{ min: 0 }}
+                            disabled={isPending || isAnalyzePending || isCreatePending || isGraphPending}
+                            helperText="デフォルト: 2"
+                        />
+                    </Grid>
+                </Grid>
 
                 {/* ボタン群 */}
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 4 }} useFlexGap>
+                    {/* Candidate ボタン */}
                     <Button
                         variant="contained"
                         color="primary"
@@ -287,6 +288,7 @@ export default function Home() {
                         {isPending ? '検索中...' : 'Get Candidate'}
                     </Button>
 
+                    {/* Analyze ボタン */}
                     <Button
                         variant="contained"
                         sx={{ bgcolor: '#ff9800', '&:hover': { bgcolor: '#e68a00' } }}
@@ -297,6 +299,7 @@ export default function Home() {
                         {isAnalyzePending ? 'Analyze中...' : 'Analyze Titles'}
                     </Button>
 
+                    {/* Create Graph ボタン */}
                     <Button
                         variant="contained"
                         color="success"
@@ -307,6 +310,7 @@ export default function Home() {
                         {isCreatePending ? '登録中...' : 'Create Graph'}
                     </Button>
 
+                    {/* Show Graph ボタン */}
                     <Button
                         variant="contained"
                         sx={{ bgcolor: '#0097a7', '&:hover': { bgcolor: '#007983' } }}
@@ -336,7 +340,7 @@ export default function Home() {
 
                 {/* グラフ描画エリア */}
                 {graphData && (
-                    <GraphVisualizationComponent data={graphData} isGraphPending={isGraphPending} keyword={keyword} />
+                    <GraphVisualizationComponent data={graphData} isGraphPending={isGraphPending} keyword={keyword} maxDepth={maxDepth} />
                 )}
 
                 {/* Analyze結果の表示 */}
@@ -356,7 +360,7 @@ export default function Home() {
 
 
 // ----------------------------------------
-// Create 結果表示コンポーネント (MUI対応)
+// Create 結果表示コンポーネント (変更なし)
 // ----------------------------------------
 interface CreateResultDisplayProps {
     status: 'idle' | 'success' | 'failure';
@@ -386,7 +390,7 @@ const CreateResultDisplay: React.FC<CreateResultDisplayProps> = ({ status }) => 
 
 
 // ----------------------------------------
-// Analyze結果表示コンポーネント (MUI対応 & デザイン修正)
+// Analyze結果表示コンポーネント (変更なし)
 // ----------------------------------------
 
 interface AnalyzeResultDisplayProps {
@@ -450,7 +454,7 @@ const AnalyzeResultDisplay: React.FC<AnalyzeResultDisplayProps> = ({ data }) => 
 };
 
 // ----------------------------------------
-// Candidate結果表示コンポーネント (MUI対応 & デザイン修正)
+// Candidate結果表示コンポーネント (変更なし)
 // ----------------------------------------
 
 interface CandidateResultDisplayProps {
@@ -521,20 +525,21 @@ const CandidateResultDisplay: React.FC<CandidateResultDisplayProps> = ({ data })
 
 
 // ----------------------------------------
-// グラフ描画コンポーネント
+// グラフ描画コンポーネント (maxDepth 表示を追加)
 // ----------------------------------------
 
 interface GraphVisualizationComponentProps {
     data: ShowGraphOutput;
     isGraphPending: boolean;
     keyword: string;
+    maxDepth: number; // 💡 maxDepth を受け取る
 }
 
-const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = ({ data, isGraphPending, keyword }) => {
+const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = ({ data, isGraphPending, keyword, maxDepth }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [isVisLoaded, setIsVisLoaded] = useState(false);
 
-    // vis.js の CDN ロード
+    // vis.js の CDN ロード (変更なし)
     useEffect(() => {
         const scriptId = 'vis-js-script';
         const win = window as any;
@@ -559,7 +564,7 @@ const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = 
         }
     }, []);
 
-    // グラフ描画ロジック
+    // グラフ描画ロジック (変更なし)
     useEffect(() => {
         if (!isVisLoaded || !containerRef.current || data.nodes.length === 0 || isGraphPending) {
             return;
@@ -624,7 +629,7 @@ const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = 
     if (data.nodes.length === 0) {
         return (
             <Alert severity="info" sx={{ my: 2 }}>
-                ℹ️ キーワード「{keyword}」に関連するグラフデータが見つかりませんでした。Create Graphを実行済みか確認してください。
+                ℹ️ キーワード「{keyword}」（最大深さ: {maxDepth}）に関連するグラフデータが見つかりませんでした。
             </Alert>
         );
     }
@@ -632,8 +637,11 @@ const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = 
     // グラフコンポーネント本体
     return (
         <Paper elevation={3} sx={{ p: 3, my: 3 }}>
-            <Typography variant="h6" component="h3" sx={{ mb: 2, fontWeight: 'bold' }}>
-                📈 グラフ表示 ({data.nodes.length} ノード / {data.edges.length} エッジ)
+            <Typography variant="h6" component="h3" sx={{ mb: 1, fontWeight: 'bold' }}>
+                📈 グラフ表示
+            </Typography>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2 }}>
+                起点キーワード: **{keyword}** / 最大深さ: **{maxDepth}** ({data.nodes.length} ノード / {data.edges.length} エッジ)
             </Typography>
             <Box
                 ref={containerRef}

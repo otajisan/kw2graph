@@ -11,7 +11,7 @@ from kw2graph.infrastructure.base import RepositoryBase
 
 logger = structlog.get_logger(__name__)
 
-# 関連語句の抽出結果の型定義 (OpenAIクライアントと共通)
+# 関連語句の抽出結果の型定義
 ExtractionResult = List[Dict[str, Any]]
 # 表示用のグラフ構造の型を定義
 GraphData = Dict[str, List[Dict[str, Any]]]
@@ -19,9 +19,8 @@ GraphData = Dict[str, List[Dict[str, Any]]]
 
 class GraphDatabaseRepository(RepositoryBase):
     """
-    Gremlin互換のグラフデータベース（例: TinkerPop Gremlin Server）
-    に接続し、キーワードと関連度を登録するリポジトリ。
-    Gremlin I/Oはasyncio.to_thread()を使って非同期ループから分離される。
+    Gremlin互換のグラフデータベースに接続するリポジトリ。
+    I/Oはasyncio.to_thread()を使って非同期ループから分離する。
     """
 
     NODE_LABEL = 'Keyword'
@@ -29,114 +28,52 @@ class GraphDatabaseRepository(RepositoryBase):
 
     def __init__(self, settings: config.Settings):
         super().__init__(settings)
-
-        # 設定情報から接続URLを構築
         self.endpoint = settings.graphdb_host
         self.port = settings.graphdb_port
         self.url = f'ws://{self.endpoint}:{self.port}/gremlin'
 
         logger.info("Initializing GraphDatabaseRepository (Thread-Safe Client)", url=self.url)
-
-        # Gremlinクライアントの作成 (接続テストは行わないレイジーロード)
         self.client: Client = client.Client(
             self.url,
             'g',
             message_serializer=serializer.GraphSONSerializersV3d0()
         )
-        # クライアントは __init__ で作成し、クエリ実行時にスレッドプール経由で利用する。
 
-    # --- Gremlin I/Oをスレッドで実行するための内部同期メソッド ---
+    # --- 同期 Gremlin I/O実行メソッド ---
 
     def _sync_execute_gremlin(self, query: str) -> List[Any]:
-        """Gremlinクエリを同期的に実行します（ThreadPoolExecutor経由で実行されます）。"""
+        """Gremlinクエリを同期的に実行します。"""
         if not self.client:
             raise ConnectionError("Gremlin Client is not initialized.")
 
         try:
-            # 同期的な client.submit() を使用し、.all().result() で結果を待機
             results: ResultSet = self.client.submit(query)
-            # .all().result() はスレッド内部で実行されるため、イベントループはブロックされない
             return results.all().result()
         except Exception as e:
-            # Gremlin I/Oエラーを捕捉
             logger.error("Synchronous Gremlin query execution failed.", query=query, error=str(e))
             raise
 
-    # --- 非同期でラップされた実行メソッド ---
+    # --- 非同期ラッパーメソッド ---
 
     async def _execute_gremlin(self, query: str) -> List[Any]:
         """非同期でスレッドプールにGremlin I/Oを投げる"""
-
-        # asyncio.to_thread() を使ってブロッキングI/O (_sync_execute_gremlin) をバックグラウンドスレッドで実行
         try:
             return await asyncio.to_thread(self._sync_execute_gremlin, query)
         except Exception as e:
-            # _sync_execute_gremlin内で発生した例外をそのまま再スロー
             raise e
 
-    # --- 公開メソッド ---
+    # ... (upsert_keyword_node, register_related_keywords はそのまま)
 
-    async def upsert_keyword_node(self, keyword: str) -> str:
-        """
-        キーワードノードをグラフに登録（Upsert: 存在しなければ作成、存在すれば取得）します。
-        """
-        query = (
-            f"g.V().has('{self.NODE_LABEL}', 'name', '{keyword}')"
-            f".fold().coalesce(unfold(),"
-            f"addV('{self.NODE_LABEL}').property('name', '{keyword}')).id()"
-        )
+    # --- グラフ取得メソッド ---
 
-        results = await self._execute_gremlin(query)
-        return results[0] if results else None
+    async def fetch_related_graph(self, seed_keyword: str, max_depth: int = 2) -> GraphData:
+        logger.info("Fetching graph data.", seed_keyword=seed_keyword, max_depth=max_depth)
 
-    async def register_related_keywords(self, seed_keyword: str, extracted_data: ExtractionResult) -> bool:
-        """
-        GPTから抽出されたデータ（関連キーワードとスコア）をグラフに非同期で登録します。
-        """
-        logger.info("Starting registration to GraphDB.", seed_keyword=seed_keyword)
-
-        try:
-            # 1. 起点ノードを取得または作成
-            seed_node_id = await self.upsert_keyword_node(seed_keyword)
-            if not seed_node_id:
-                logger.error("Failed to upsert seed keyword node.", keyword=seed_keyword)
-                return False
-
-            # 2. 各関連キーワードを登録
-            for item in extracted_data:
-                related_keyword = item['keyword']
-                score = item['score']
-
-                # 関連ノードを取得または作成
-                related_node_id = await self.upsert_keyword_node(related_keyword)
-
-                if related_node_id:
-                    # 3. エッジ (関連) を作成/更新
-                    edge_query = (
-                        f"g.V('{seed_node_id}').as('a').V('{related_node_id}').coalesce("
-                        f"inE('{self.EDGE_LABEL}').where(outV().is('a')),"
-                        f"addE('{self.EDGE_LABEL}').from('a')).property('score', {score})"
-                    )
-
-                    await self._execute_gremlin(edge_query)
-                    logger.debug("Edge registered.", source=seed_keyword, target=related_keyword, score=score)
-
-            logger.info("GraphDB registration finished successfully.", seed_keyword=seed_keyword)
-            return True
-
-        except (ConnectionError, Exception) as e:
-            # Gremlin I/Oや接続の問題をここで捕捉
-            logger.error("GraphDB registration failed due to an error.", seed_keyword=seed_keyword, error=str(e))
-            return False
-
-    async def fetch_related_graph(self, seed_keyword: str) -> GraphData:
-        logger.info("Fetching graph data.", seed_keyword=seed_keyword)
-
-        # 1. 接続ノード（Vertex）の取得クエリ
-        # 始点ノードとその関連ノードをすべて取得し、ノードIDとプロパティを抽出
+        # 1. ノード取得クエリ: 起点ノードと max_depth ホップ先のノードをすべて取得
         nodes_query = (
             f"g.V().has('{self.NODE_LABEL}', 'name', '{seed_keyword}').as('start')."
-            f"union(identity(), both('{self.EDGE_LABEL}'))."  # 起点ノード自身と、両方向に繋がるノードを取得
+            f"repeat(both('{self.EDGE_LABEL}')).times({max_depth}).emit()."
+            f"union(identity(), select('start'))."  # 始点ノードを確実に追加
             f"dedup()."
             f"project('id', 'name')."
             f"by(id())."
@@ -144,15 +81,16 @@ class GraphDatabaseRepository(RepositoryBase):
             f"toList()"
         )
 
-        # 2. エッジ（Edge）の取得クエリ
-        # 始点ノードから出る/入るエッジを取得し、接続情報とスコアを抽出
+        # 2. エッジ取得クエリ: 多ホップで接続されたノード間すべてのエッジを取得
         edges_query = (
             f"g.V().has('{self.NODE_LABEL}', 'name', '{seed_keyword}')."
-            f"bothE('{self.EDGE_LABEL}').dedup()."
+            f"repeat(bothE('{self.EDGE_LABEL}').otherV()).times({max_depth})."  # ノード間を移動し、emitで経路上のノードを収集
+            f"emit()."
+            f"bothE('{self.EDGE_LABEL}').dedup()."  # 収集されたノード群からすべての関連エッジを再度取得し、重複を排除
             f"project('id', 'score', 'from_id', 'to_id')."
             f"by(id())."
             f"by(coalesce(values('score'), constant(0.0)))."
-            f"by(__.outV().id())."  # ここで outV().id() が実行されるのはエッジに対してなので安全
+            f"by(__.outV().id())."
             f"by(__.inV().id())."
             f"toList()"
         )
@@ -162,15 +100,16 @@ class GraphDatabaseRepository(RepositoryBase):
             raw_nodes = await self._execute_gremlin(nodes_query)
             raw_edges = await self._execute_gremlin(edges_query)
         except Exception as e:
-            logger.error("Failed to fetch graph data from Gremlin (Split Query).", error=str(e))
+            logger.error("Failed to fetch graph data from Gremlin (Final Query).", error=str(e))
             return {"nodes": [], "edges": []}
 
-        # 4. 結果の整形（Python側で結合）
+        # 4. 結果の整形（Python側で結合と型変換）
         nodes = {}
         edges = []
 
-        for item in raw_nodes:  # ノード情報の整形
-            node_id = str(item.get('id'))  # ★ 修正: IDを文字列にキャスト
+        # ノード整形 (Long IDをStringに、nameをlabelに)
+        for item in raw_nodes:
+            node_id = str(item.get('id'))
             if node_id not in nodes:
                 nodes[node_id] = {
                     "id": node_id,
@@ -178,23 +117,21 @@ class GraphDatabaseRepository(RepositoryBase):
                     "group": self.NODE_LABEL
                 }
 
-        # エッジの整形
+        # エッジ整形 (Long IDをStringに、BigDecimalをFloatに)
         for item in raw_edges:
             score_value = item.get('score')
 
-            # BigDecimalをfloatに変換するロジック
+            # BigDecimalをfloatに変換
             if hasattr(score_value, 'unscaled_value') and hasattr(score_value, 'scale'):
-                # GremlinのBigDecimalオブジェクトの場合
                 score_float = float(score_value.unscaled_value) / (10 ** score_value.scale)
             else:
-                # すでにfloatまたはintの場合
                 score_float = float(score_value)
 
             edges.append({
-                "id": str(item.get('id')),  # ★ 修正: IDを文字列にキャスト
-                "from_node": str(item.get('from_id')),  # ★ 修正: IDを文字列にキャスト
-                "to_node": str(item.get('to_id')),  # ★ 修正: IDを文字列にキャスト
-                "score": score_float  # ★ 修正: floatに変換した値を格納
+                "id": str(item.get('id')),
+                "from_node": str(item.get('from_id')),
+                "to_node": str(item.get('to_id')),
+                "score": score_float
             })
 
         return {"nodes": list(nodes.values()), "edges": edges}

@@ -11,12 +11,12 @@ class GraphFetcherService(ServiceBase):
         super().__init__(settings)
         self.repo = GraphDatabaseRepository(settings)
 
-    async def fetch(self, seed_keyword: str) -> GraphData:
+    async def fetch(self, seed_keyword: str, max_depth: int) -> GraphData:
         """
         グラフリポジトリから関連グラフデータを取得する。
         """
         # 現在、特別なドメインロジックはないため、リポジトリを直接呼び出す
-        response = await self.repo.fetch_related_graph(seed_keyword)
+        response = await self.repo.fetch_related_graph(seed_keyword, max_depth)
 
         logger.info(f"fetch {seed_keyword} result: {response}")
 

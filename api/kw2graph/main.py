@@ -67,16 +67,17 @@ async def create_graph(request: CreateGraphInput):
 
 
 @app.get('/show_graph', response_model=ShowGraphOutput)
-async def show_graph(seed_keyword: str):
+async def show_graph(seed_keyword: str, max_depth: int = 2):  # ★ パラメータを追加
     """
-    指定されたキーワードを起点とする関連グラフデータを取得する。
+    指定されたキーワードを起点とする関連グラフデータを、指定された深さまで取得する。
     """
     # GETリクエストのため、クエリパラメータからInputを作成
-    request = ShowGraphInput(seed_keyword=seed_keyword)
+    request = ShowGraphInput(
+        seed_keyword=seed_keyword,
+        max_depth=max_depth  # ★ パラメータを追加
+    )
 
     use_case = ShowGraphUseCase(settings)
-
-    # ユースケースを実行
     response = await use_case.execute(request)
 
     return response
