@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  gremlin-server:
+    # 使用するApache TinkerPop Gremlin Serverの公式イメージを指定
+    image: tinkerpop/gremlin-server:3.7.0
+
+    # コンテナの再起動ポリシーを設定（エラー時またはホスト再起動時に再起動）
+    restart: always
+
+    # 接続に必要なポートを公開（ホスト:コンテナ）
+    # FastAPIやG.V.からの接続に使用します。
+    ports:
+      - "8182:8182"
+
+    # データを永続化するためのボリュームを設定
+    # コンテナが削除されてもデータはホストマシンに残ります。
+    volumes:
+      # /opt/gremlin-server/data/graph は Gremlin Serverがグラフデータを保存する場所
+      - gremlin_data:/opt/gremlin-server/data/graph
+
+    # 起動時のコンテナ名を指定（管理しやすくするため）
+    container_name: gremlin-server
+
+# Docker Volumes の定義
+volumes:
+  gremlin_data:
+    driver: local

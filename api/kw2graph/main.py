@@ -11,10 +11,13 @@ from starlette.middleware.cors import CORSMiddleware
 from kw2graph import settings
 from kw2graph.usecase.analyze import AnalyzeKeywordsUseCase
 from kw2graph.usecase.candidate import GetCandidateUseCase
+from kw2graph.usecase.create_graph import CreateGraphUseCase
 from kw2graph.usecase.input.analyze import AnalyzeKeywordsInput
 from kw2graph.usecase.input.candidate import GetCandidateInput
+from kw2graph.usecase.input.create_graph import CreateGraphInput
 from kw2graph.usecase.output.analyze import AnalyzeKeywordsOutput
 from kw2graph.usecase.output.candidate import GetCandidateOutput
+from kw2graph.usecase.output.create_graph import CreateGraphOutput
 
 logger = structlog.get_logger(__name__)
 
@@ -51,6 +54,13 @@ async def get_candidate(request: GetCandidateInput):
 @app.post('/analyze', response_model=AnalyzeKeywordsOutput)
 async def analyze(request: AnalyzeKeywordsInput):
     use_case = AnalyzeKeywordsUseCase(settings)
+    response = use_case.execute(request)
+    return response
+
+
+@app.post('/create', response_model=CreateGraphOutput)
+async def create_graph(request: CreateGraphInput):
+    use_case = CreateGraphUseCase(settings)
     response = use_case.execute(request)
     return response
 
