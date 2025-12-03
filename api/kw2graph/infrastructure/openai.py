@@ -21,7 +21,7 @@ class OpenAiRepository(RepositoryBase):
         self.client = OpenAI(api_key=settings.openai_api_key)
 
     @staticmethod
-    def _generate_prompt(seed_keyword: str, titles: List[str]) -> str:
+    def _generate_prompt_old(seed_keyword: str, titles: List[str]) -> str:
         titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
 
         prompt = f"""
@@ -47,6 +47,40 @@ class OpenAiRepository(RepositoryBase):
       ]
     }}
     """
+        logger.debug(f"Generating prompt: \n{prompt}")
+        return prompt
+
+    @staticmethod
+    def _generate_prompt(seed_keyword: str, titles: List[str]) -> str:
+        titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
+
+        prompt = f"""
+        あなたはキーワード抽出とスコアリングの専門家です。
+        以下の手順で、提供されたコンテンツタイトル群から**シードキーワードを修飾する最も具体的かつ独立した語句**を抽出してください。
+
+        #シードキーワード: {seed_keyword}
+
+        #コンテンツタイトル群:
+        {titles_str}
+
+        #手順
+        1. 抽出対象は、シードキーワード「{seed_keyword}」から**独立して意味を持つ、単一の要素**（カスタム名、部品名、行為など）とする。
+        2. 抽出語句は、**シードキーワード（例: ランクル70）を繰り返して含めない**こと。（例: "新型ランクル70 カスタム" ではなく、**"カスタム"** を抽出すること）
+        3. 抽出された各語句に対し、シードキーワードとの**関連度を0.0から1.0の間でスコア**（float型）として付与する。
+        4. 結果をJSON形式のオブジェクトとして出力する。**出力は必ずJSON形式のみ**とし、他の説明や前置きは含めないでください。
+
+        #出力例 (シードキーワードが「ランクル70」の場合の期待値):
+        {{
+          "related_keywords": [
+            {{"keyword": "カスタム", "score": 0.98}},
+            {{"keyword": "アイアンバンパー", "score": 0.90}},
+            {{"keyword": "再販", "score": 0.95}},
+            {{"keyword": "納車", "score": 0.85}},
+            ...
+          ]
+        }}
+
+        """
         logger.debug(f"Generating prompt: \n{prompt}")
         return prompt
 
