@@ -26,21 +26,16 @@ class GraphDatabaseRepository(RepositoryBase):
     NODE_LABEL = 'Keyword'
     EDGE_LABEL = 'RELATED_TO'
 
-    def __init__(self, settings: config.Settings):
+    def __init__(self, settings: config.Settings, client_instance: Client):
         super().__init__(settings)
         self.endpoint = settings.graphdb_host
         self.port = settings.graphdb_port
         self.url = f'ws://{self.endpoint}:{self.port}/gremlin'
 
         logger.info("Initializing GraphDatabaseRepository (Thread-Safe Client)", url=self.url)
-        self.client: Client = client.Client(
-            self.url,
-            'g',
-            message_serializer=serializer.GraphSONSerializersV3d0()
-        )
+        self.client: Client = client_instance
 
     # --- 同期 Gremlin I/O実行メソッド ---
-
     def _sync_execute_gremlin(self, query: str) -> List[Any]:
         """Gremlinクエリを同期的に実行します。"""
         if not self.client:

@@ -5,9 +5,9 @@ from kw2graph.usecase.output.create_graph import CreateGraphOutput
 
 
 class GraphCreatorService(ServiceBase):
-    def __init__(self, settings):
+    def __init__(self, settings, graph_repo: GraphDatabaseRepository):
         super().__init__(settings)
-        self.repo = GraphDatabaseRepository(settings)
+        self.repo = graph_repo
 
     async def create(self, in_data: CreateGraphInput) -> CreateGraphOutput:
         children = [item.model_dump() for item in in_data.children]

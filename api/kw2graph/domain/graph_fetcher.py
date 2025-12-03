@@ -7,9 +7,9 @@ logger = structlog.get_logger(__name__)
 
 
 class GraphFetcherService(ServiceBase):
-    def __init__(self, settings):
+    def __init__(self, settings, graph_repo: GraphDatabaseRepository):
         super().__init__(settings)
-        self.repo = GraphDatabaseRepository(settings)
+        self.repo = graph_repo
 
     async def fetch(self, seed_keyword: str, max_depth: int) -> GraphData:
         """
