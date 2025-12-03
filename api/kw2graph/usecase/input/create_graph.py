@@ -6,6 +6,8 @@ from kw2graph.usecase.input.base import InputBase
 class CreateGraphInputItem(InputBase):
     keyword: str
     score: float
+    iab_categories: List[str]
+    entity_type: str
 
 
 class CreateGraphInput(InputBase):

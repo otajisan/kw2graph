@@ -151,4 +151,4 @@ if __name__ == '__main__':
     # https://fastapi.tiangolo.com/ja/tutorial/debugging/
     import uvicorn
 
-    uvicorn.run(app, host='0.0.0.0', port=8000, log_level='debug')
+    uvicorn.run(app, host='0.0.0.0', port=8000, timeout_keep_alive=120, log_level='debug')

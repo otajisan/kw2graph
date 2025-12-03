@@ -24,12 +24,18 @@ class KeywordsAnalyzerService(ServiceBase):
         logger.info(f"Extracted {len(response)} related keywords")
         return self.parse_response(seed_keyword=in_data.seed_keyword, response=response)
 
-    def parse_response(self, seed_keyword: str, response: OpenAiExtractionResult) -> AnalyzeKeywordsOutput:
+    @staticmethod
+    def parse_response(seed_keyword: str, response: OpenAiExtractionResult) -> AnalyzeKeywordsOutput:
         logger.debug(f"Parsing OpenAI response: {response}")
 
         results: List[AnalyzeKeywordsOutputItem] = []
         for item in response:
-            results.append(AnalyzeKeywordsOutputItem(keyword=item['keyword'], score=item['score']))
+            results.append(AnalyzeKeywordsOutputItem(
+                keyword=item['keyword'],
+                score=item['score'],
+                iab_categories=item['iab_categories'],
+                entity_type=item['entity_type']
+            ))
 
         return AnalyzeKeywordsOutput(
             seed_keyword=seed_keyword,

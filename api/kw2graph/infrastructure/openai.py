@@ -85,7 +85,7 @@ class OpenAiRepository(RepositoryBase):
         return prompt
 
     @staticmethod
-    def _generate_prompt(seed_keyword: str, titles: List[str]) -> str:
+    def _generate_prompt_old3(seed_keyword: str, titles: List[str]) -> str:
         titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
 
         prompt = f"""
@@ -112,6 +112,122 @@ class OpenAiRepository(RepositoryBase):
             {{"keyword": "栗まんじゅう編", "score": 0.92}},      // 詳細（エピソード名）
             {{"keyword": "カップラーメン", "score": 0.85}},      // 詳細（商品名/モノ）
             {{"keyword": "描き方", "score": 0.82}},             // 詳細（行為）
+            ...
+          ]
+        }}
+        """
+        logger.debug(f"Generating prompt: \n{prompt}")
+        return prompt
+
+    @staticmethod
+    def _generate_prompt_old4(seed_keyword: str, titles: List[str]) -> str:
+        titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
+
+        # 広告業界標準の IAB Tier 1 カテゴリリスト
+        IAB_CATEGORIES = [
+            "Arts & Entertainment", "Automotive", "Business", "Careers", "Education",
+            "Family & Relationships", "Food & Drink", "Health & Fitness", "Hobbies & Interests",
+            "Home & Garden", "Law, Govt & Politics", "News", "Personal Finance", "Pets",
+            "Science", "Shopping", "Sports", "Style & Fashion", "Technology & Computing",
+            "Travel", "Video Gaming", "Other"
+        ]
+        iab_list_str = ", ".join(IAB_CATEGORIES)
+
+        prompt = f"""
+        あなたはキーワード抽出、階層分析、および標準化された分類を専門とするエキスパートAIです。
+        提供されたコンテンツタイトル群を分析し、シードキーワード「{seed_keyword}」に関する以下の3つの属性を持つ語句を抽出し、JSON形式でリスト化してください。
+
+        #シードキーワード: {seed_keyword}
+
+        #コンテンツタイトル群:
+        {titles_str}
+
+        #手順
+        1. **上位概念の特定**: タイトル群全体から、「{seed_keyword}」が属する**最も重要なカテゴリ名や主題**を抽出する。これらの語句には最も高いスコアを付与すること。
+        2. **詳細語句の分解**: タイトルから、シードキーワードを修飾する**具体的かつ独立した語句**（部品名、エピソード名、行為など）を抽出する。抽出語句は、シードキーワード自体（例: くりまんじゅう）を**含めない**ように徹底して分解すること。
+        3. **entity_type の判断**: 抽出された各語句が、**特定の固有名詞（人名、作品名、商品名など）であれば 'Proper'** を、**一般的な名詞や概念であれば 'General'** を判断し付与する。
+        4. **IAB分類へのマッピング**: 抽出された各語句に対し、その語句の意味を最も適切に表す**IAB Tier 1 カテゴリを**、以下のリストから**最大3つまで選択**し、'iab_categories' として**文字列の配列（リスト）**で付与すること。
+
+        【IAB Tier 1 カテゴリ リスト】: {iab_list_str}
+
+        #JSON出力形式:
+        {{
+          "related_keywords": [
+            {{
+              "keyword": "抽出された語句", 
+              "score": 関連度スコア, 
+              "iab_categories": ["カテゴリ1", "カテゴリ2"], // ★ 修正: リスト型
+              "entity_type": "Proper/General"        
+            }},
+            {{
+              "keyword": "別の語句", 
+              "score": 別の関連度スコア,
+              "iab_categories": ["別のカテゴリ名"],
+              "entity_type": "Proper/General"
+            }},
+            ...
+          ]
+        }}
+
+        #出力例 (シードキーワードが「くりまんじゅう」の場合の期待値):
+        {{
+          "related_keywords": [
+            {{"keyword": "ちいかわ", "score": 0.99, "iab_categories": ["Arts & Entertainment", "Family & Relationships"], "entity_type": "Proper"}},
+            {{"keyword": "カップラーメン", "score": 0.85, "iab_categories": ["Food & Drink"], "entity_type": "Proper"}},
+            ...
+          ]
+        }}
+        """
+        logger.debug(f"Generating prompt: \n{prompt}")
+        return prompt
+
+    @staticmethod
+    def _generate_prompt(seed_keyword: str, titles: List[str]) -> str:
+        titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
+
+        # IAB カテゴリリストはそのまま維持（必須情報）
+        IAB_CATEGORIES = [
+            "Arts & Entertainment", "Automotive", "Business", "Careers", "Education",
+            "Family & Relationships", "Food & Drink", "Health & Fitness", "Hobbies & Interests",
+            "Home & Garden", "Law, Govt & Politics", "News", "Personal Finance", "Pets",
+            "Science", "Shopping", "Sports", "Style & Fashion", "Technology & Computing",
+            "Travel", "Video Gaming", "Other"
+        ]
+        iab_list_str = ", ".join(IAB_CATEGORIES)
+
+        prompt = f"""
+        コンテンツタイトル群を分析し、シードキーワード「{seed_keyword}」に関する以下の属性を持つ語句を抽出し、JSON形式でリスト化してください。
+
+        #シードキーワード: {seed_keyword}
+
+        #コンテンツタイトル群:
+        {titles_str}
+
+        #抽出と分類のルール
+        * **語句 (keyword)**: 
+            1. タイトル群の**上位概念/主題**（例: ちいかわ、アニメ）を抽出する。
+            2. シードキーワードを**修飾する具体的かつ独立した語句**（例: 部品名、エピソード名）を、シードキーワードを含めずに**徹底して分解**し抽出する。
+        * **関連度 (score)**: 0.0〜1.0 の間で付与する。上位概念には最も高いスコアを付与する。
+        * **エンティティ種別 (entity_type)**: 固有名詞（作品名、商品名など）は 'Proper'、一般的名詞/概念は 'General' とする。
+        * **IABカテゴリ (iab_categories)**: 以下の【IAB Tier 1 カテゴリ リスト】から、**最大3つ**をリストとして選択する。
+
+        【IAB Tier 1 カテゴリ リスト】: {iab_list_str}
+
+        #JSON出力形式:
+        {{
+          "related_keywords": [
+            {{
+              "keyword": "抽出された語句", 
+              "score": 関連度スコア, 
+              "iab_categories": ["カテゴリ1", "カテゴリ2"],
+              "entity_type": "Proper/General"        
+            }},
+            {{
+              "keyword": "別の語句", 
+              "score": 別の関連度スコア,
+              "iab_categories": ["別のカテゴリ名"],
+              "entity_type": "Proper/General"
+            }},
             ...
           ]
         }}
