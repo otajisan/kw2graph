@@ -97,7 +97,7 @@ class OpenAiRepository(RepositoryBase):
                      "content": "あなたは与えられたテキストから関連キーワードを抽出し、指定されたJSON形式のオブジェクトで出力するエキスパートです。"},
                     {"role": "user", "content": prompt}
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
 
             logger.debug(f'Generated response: {response}')

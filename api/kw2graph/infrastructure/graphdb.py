@@ -64,16 +64,23 @@ class GraphDatabaseRepository(RepositoryBase):
 
     async def upsert_keyword_node(self, keyword: str) -> str:
         """
-        キーワードノードをグラフに登録（Upsert: 存在しなければ作成、存在すれば取得）します。
+        キーワードノードをUpsertし、そのIDを返します。
         """
-        query = (
-            f"g.V().has('{self.NODE_LABEL}', 'name', '{keyword}')"
-            f".fold().coalesce(unfold(),"
-            f"addV('{self.NODE_LABEL}').property('name', '{keyword}')).id()"
+        # Gremlin Upsert クエリの修正 (より堅牢なパターン)
+        # 既存のノードを探し、なければ addV を実行する。
+        upsert_query = (
+            f"g.V().has('{self.NODE_LABEL}', 'name', '{keyword}')"  # 1. 既存ノードを検索
+            f".fold().coalesce("
+            f"  unfold(),"  # ノードが存在すればそれを返す
+            f"  addV('{self.NODE_LABEL}').property('name', '{keyword}')"  # 存在しなければ作成
+            f").id()"  # 最終的にノードのIDを返す
         )
 
-        results = await self._execute_gremlin(query)
-        return results[0] if results else None
+        # 実行
+        results = await self._execute_gremlin(upsert_query)
+        # 結果はノードIDのリストとして返される
+        # TinkerPopはIDをLong型で返すことが多いため、str()にキャスト
+        return str(results[0]) if results else None
 
     async def register_related_keywords(self, seed_keyword: str, extracted_data: ExtractionResult) -> bool:
         """
