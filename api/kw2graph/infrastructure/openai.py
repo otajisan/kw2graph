@@ -51,7 +51,7 @@ class OpenAiRepository(RepositoryBase):
         return prompt
 
     @staticmethod
-    def _generate_prompt(seed_keyword: str, titles: List[str]) -> str:
+    def _generate_prompt_old2(seed_keyword: str, titles: List[str]) -> str:
         titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
 
         prompt = f"""
@@ -80,6 +80,41 @@ class OpenAiRepository(RepositoryBase):
           ]
         }}
 
+        """
+        logger.debug(f"Generating prompt: \n{prompt}")
+        return prompt
+
+    @staticmethod
+    def _generate_prompt(seed_keyword: str, titles: List[str]) -> str:
+        titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
+
+        prompt = f"""
+        あなたはキーワード抽出とスコアリングの専門家です。
+        提供されたコンテンツタイトル群から、**シードキーワードが属する上位概念**および**具体的な関連詳細語句**の両方を抽出し、関連度をスコア化してください。
+
+        #シードキーワード: {seed_keyword}
+
+        #コンテンツタイトル群:
+        {titles_str}
+
+        #手順
+        1. 抽出対象は、以下の2種類とする。
+           - **上位概念/主題**: シードキーワードが属する**最も重要なカテゴリ**（例: 「ちいかわ」「アニメ」「キャラクター」）。これらのスコアは高く設定すること。
+           - **具体的な詳細**: シードキーワードを**修飾する**最も具体的かつ独立した語句（例: 「アイアンバンパー」「カップラーメン」「描き方」）。抽出語句は、**シードキーワード（例: くりまんじゅう）を繰り返して含めない**こと。
+        2. 抽出された各語句に対し、シードキーワード「{seed_keyword}」との**関連度を0.0から1.0の間でスコア**（float型）として付与する。
+        3. 結果をJSON形式のオブジェクトとして出力する。**出力は必ずJSON形式のみ**とし、他の説明や前置きは含めないでください。
+
+        #出力例 (シードキーワードが「くりまんじゅう」の場合の期待値):
+        {{
+          "related_keywords": [
+            {{"keyword": "ちいかわ", "score": 0.99}},          // 上位概念
+            {{"keyword": "アニメ", "score": 0.96}},            // 上位概念
+            {{"keyword": "栗まんじゅう編", "score": 0.92}},      // 詳細（エピソード名）
+            {{"keyword": "カップラーメン", "score": 0.85}},      // 詳細（商品名/モノ）
+            {{"keyword": "描き方", "score": 0.82}},             // 詳細（行為）
+            ...
+          ]
+        }}
         """
         logger.debug(f"Generating prompt: \n{prompt}")
         return prompt
