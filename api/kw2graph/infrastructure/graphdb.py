@@ -62,7 +62,58 @@ class GraphDatabaseRepository(RepositoryBase):
         except Exception as e:
             raise e
 
-    # ... (upsert_keyword_node, register_related_keywords はそのまま)
+    async def upsert_keyword_node(self, keyword: str) -> str:
+        """
+        キーワードノードをグラフに登録（Upsert: 存在しなければ作成、存在すれば取得）します。
+        """
+        query = (
+            f"g.V().has('{self.NODE_LABEL}', 'name', '{keyword}')"
+            f".fold().coalesce(unfold(),"
+            f"addV('{self.NODE_LABEL}').property('name', '{keyword}')).id()"
+        )
+
+        results = await self._execute_gremlin(query)
+        return results[0] if results else None
+
+    async def register_related_keywords(self, seed_keyword: str, extracted_data: ExtractionResult) -> bool:
+        """
+        GPTから抽出されたデータ（関連キーワードとスコア）をグラフに非同期で登録します。
+        """
+        logger.info("Starting registration to GraphDB.", seed_keyword=seed_keyword)
+
+        try:
+            # 1. 起点ノードを取得または作成
+            seed_node_id = await self.upsert_keyword_node(seed_keyword)
+            if not seed_node_id:
+                logger.error("Failed to upsert seed keyword node.", keyword=seed_keyword)
+                return False
+
+            # 2. 各関連キーワードを登録
+            for item in extracted_data:
+                related_keyword = item['keyword']
+                score = item['score']
+
+                # 関連ノードを取得または作成
+                related_node_id = await self.upsert_keyword_node(related_keyword)
+
+                if related_node_id:
+                    # 3. エッジ (関連) を作成/更新
+                    edge_query = (
+                        f"g.V('{seed_node_id}').as('a').V('{related_node_id}').coalesce("
+                        f"inE('{self.EDGE_LABEL}').where(outV().is('a')),"
+                        f"addE('{self.EDGE_LABEL}').from('a')).property('score', {score})"
+                    )
+
+                    await self._execute_gremlin(edge_query)
+                    logger.debug("Edge registered.", source=seed_keyword, target=related_keyword, score=score)
+
+            logger.info("GraphDB registration finished successfully.", seed_keyword=seed_keyword)
+            return True
+
+        except (ConnectionError, Exception) as e:
+            # Gremlin I/Oや接続の問題をここで捕捉
+            logger.error("GraphDB registration failed due to an error.", seed_keyword=seed_keyword, error=str(e))
+            return False
 
     # --- グラフ取得メソッド ---
 
