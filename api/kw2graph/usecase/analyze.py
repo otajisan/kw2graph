@@ -9,5 +9,5 @@ class AnalyzeKeywordsUseCase(UseCaseBase):
         super().__init__(settings)
         self.analyzer = KeywordsAnalyzerService(settings)
 
-    def execute(self, in_data: AnalyzeKeywordsInput) -> AnalyzeKeywordsOutput:
-        return self.analyzer.analyze(in_data)
+    async def execute(self, in_data: AnalyzeKeywordsInput) -> AnalyzeKeywordsOutput:
+        return await self.analyzer.analyze(in_data, use_batch=True)

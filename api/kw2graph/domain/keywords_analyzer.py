@@ -1,3 +1,4 @@
+import asyncio
 from typing import List
 
 import structlog
@@ -18,9 +19,33 @@ class KeywordsAnalyzerService(ServiceBase):
         self.openai_repo = OpenAiRepository(settings)
         self.formatter = TextFormatter()
 
-    def analyze(self, in_data: AnalyzeKeywordsInput) -> AnalyzeKeywordsOutput:
+    async def analyze(self, in_data: AnalyzeKeywordsInput, use_batch: bool = True) -> AnalyzeKeywordsOutput:
+        """
+        OpenAI APIを呼び出し、キーワードと属性を抽出します。
+        デフォルトでは、パフォーマンス向上のため非同期バッチ処理を使用します。
+        """
         normalized_keywords = self.formatter.normalize_titles_list(in_data.children)
-        response = self.openai_repo.extract_related_keywords(in_data.seed_keyword, normalized_keywords)
+
+        if not normalized_keywords:
+            logger.warning("Normalized keywords list is empty. Skipping OpenAI call.")
+            return AnalyzeKeywordsOutput(seed_keyword=in_data.seed_keyword, results=[])
+
+        # 処理の分岐
+        if use_batch:
+            # ★ 修正: 非同期バッチ処理を呼び出し、awaitする
+            response = await self.openai_repo.async_extract_related_keywords_batch(
+                in_data.seed_keyword,
+                normalized_keywords
+            )
+        else:
+            # ★ 修正: 同期処理をスレッドでラップして呼び出す (FastAPI内では推奨)
+            # 既存の同期メソッドを呼び出しつつ、FastAPIのイベントループをブロックしないように asyncio.to_thread を使用
+            response = await asyncio.to_thread(
+                self.openai_repo.extract_related_keywords,
+                in_data.seed_keyword,
+                normalized_keywords
+            )
+
         logger.info(f"Extracted {len(response)} related keywords")
         return self.parse_response(seed_keyword=in_data.seed_keyword, response=response)
 

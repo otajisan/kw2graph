@@ -89,7 +89,7 @@ async def get_candidate(request: GetCandidateInput):
 @app.post('/analyze', response_model=AnalyzeKeywordsOutput)
 async def analyze(request: AnalyzeKeywordsInput):
     use_case = AnalyzeKeywordsUseCase(settings)
-    response = use_case.execute(request)
+    response = await use_case.execute(request)
     return response
 
 

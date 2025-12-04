@@ -1,5 +1,6 @@
+import asyncio
 from json import JSONDecodeError
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Awaitable
 
 import json
 import structlog
@@ -15,6 +16,7 @@ OpenAiExtractionResult = List[Dict[str, Any]]
 
 class OpenAiRepository(RepositoryBase):
     MODEL = "gpt-5-nano"
+    BATCH_SIZE = 10
 
     def __init__(self, settings: config.Settings):
         super().__init__(settings)
@@ -273,3 +275,49 @@ class OpenAiRepository(RepositoryBase):
         except Exception as e:
             print(f"OpenAI API呼び出しエラー: {e}")
             return []
+
+    # -----------------------------------------------------------
+    # 2. 新規関数: 非同期バッチ処理 (Parallel/Non-Blocking) を追加
+    # -----------------------------------------------------------
+
+    async def _process_batch_async(self, seed_keyword: str, batch_titles: List[str]) -> OpenAiExtractionResult:
+        """
+        単一のタイトルバッチに対してOpenAI APIコールを非同期(スレッド)で実行します。
+        """
+        # 同期関数を asyncio.to_thread でラップし、メインイベントループをブロックしないようにする
+        return await asyncio.to_thread(self.extract_related_keywords, seed_keyword, batch_titles)
+
+    async def async_extract_related_keywords_batch(self, seed_keyword: str,
+                                                   titles: List[str]) -> OpenAiExtractionResult:
+        """
+        タイトルリストをバッチに分割し、OpenAI APIを並列で実行します。(非同期処理)
+        """
+        # タイトルリストをバッチに分割
+        batches: List[List[str]] = [
+            titles[i:i + self.BATCH_SIZE]
+            for i in range(0, len(titles), self.BATCH_SIZE)
+        ]
+
+        logger.info(f"OpenAI extraction split into {len(batches)} batches for parallel processing (ASYNC).")
+
+        # 各バッチの処理タスクを作成
+        tasks: List[Awaitable[OpenAiExtractionResult]] = [
+            self._process_batch_async(seed_keyword, batch)
+            for batch in batches
+        ]
+
+        # asyncio.gather() を使って、すべてのバッチを並列実行
+        results_from_batches: List[OpenAiExtractionResult] = await asyncio.gather(*tasks, return_exceptions=True)
+
+        final_result: OpenAiExtractionResult = []
+        for result in results_from_batches:
+            if isinstance(result, list):
+                final_result.extend(result)
+            else:
+                # バッチ処理中に例外が発生した場合
+                logger.error("A batch failed during parallel execution.", exception=result)
+
+        # 重複排除が必要な場合は、ここで実装します。
+        # (例: return list({frozenset(d.items()): d for d in final_result}.values()))
+
+        return final_result
