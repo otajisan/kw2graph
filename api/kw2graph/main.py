@@ -2,12 +2,13 @@ import json
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, BackgroundTasks
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
+from starlette.status import HTTP_202_ACCEPTED
 
 from kw2graph import settings
 from kw2graph.infrastructure.graphdb import GraphDatabaseRepository
@@ -22,6 +23,7 @@ from kw2graph.usecase.output.analyze import AnalyzeKeywordsOutput
 from kw2graph.usecase.output.candidate import GetCandidateOutput
 from kw2graph.usecase.output.create_graph import CreateGraphOutput
 from kw2graph.usecase.show_graph import ShowGraphInput, ShowGraphUseCase, ShowGraphOutput
+from kw2graph.usecase.submit_task import SubmitTaskOutput, SubmitTaskInput, SubmitGraphAnalysisUseCase
 
 logger = structlog.get_logger(__name__)
 
@@ -82,7 +84,7 @@ async def healthz():
 @app.post('/candidate', response_model=GetCandidateOutput)
 async def get_candidate(request: GetCandidateInput):
     use_case = GetCandidateUseCase(settings)
-    response = use_case.execute(request)
+    response = await use_case.execute(request)
     return response
 
 
@@ -101,6 +103,35 @@ async def create_graph(
     use_case = CreateGraphUseCase(settings, graph_repo=repo)
     response = await use_case.execute(request)
     return response
+
+
+@app.post('/submit_task', response_model=SubmitTaskOutput, status_code=HTTP_202_ACCEPTED)
+async def submit_analysis_task(
+        request: SubmitTaskInput,
+        background_tasks: BackgroundTasks,  # FastAPIのバックグラウンドタスク機能
+        graph_repo: GraphDatabaseRepository = Depends(get_graphdb_repository)
+):
+    """
+    キーワード解析とGraphDB登録をバックグラウンドタスクとして非同期に実行する。
+    クライアントにはすぐに 202 Accepted を返す。
+    """
+
+    # 💡 BackgroundTasks に、ユースケースの実行関数を登録
+    # 注意: BackgroundTasksに登録する関数は、引数を直接渡す必要があります。
+    # 登録されたタスクは、エンドポイントの応答が返された後に実行されます。
+
+    use_case = SubmitGraphAnalysisUseCase(settings, graph_repo)
+
+    # ユースケースの実行関数と引数を登録
+    background_tasks.add_task(
+        use_case.execute,
+        request
+    )
+
+    return SubmitTaskOutput(
+        success=True,
+        message=f"Analysis task submitted for keyword '{request.seed_keyword}'. Processing in background."
+    )
 
 
 @app.get('/show_graph', response_model=ShowGraphOutput)

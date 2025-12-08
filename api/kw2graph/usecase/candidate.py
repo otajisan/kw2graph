@@ -10,5 +10,5 @@ class GetCandidateUseCase(UseCaseBase):
         super().__init__(settings)
         self.fetcher = ContentsFetcherService(settings)
 
-    def execute(self, in_data: GetCandidateInput) -> GetCandidateOutput:
-        return self.fetcher.fetch(in_data)
+    async def execute(self, in_data: GetCandidateInput) -> GetCandidateOutput:
+        return await self.fetcher.fetch(in_data)

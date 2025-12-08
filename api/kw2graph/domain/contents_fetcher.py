@@ -16,8 +16,8 @@ class ContentsFetcherService(ServiceBase):
         super().__init__(settings)
         self.es_repo = ElasticsearchRepository(settings)
 
-    def fetch(self, in_data: GetCandidateInput) -> GetCandidateOutput:
-        response = self.es_repo.search(in_data.index, in_data.field, in_data.keyword)
+    async def fetch(self, in_data: GetCandidateInput) -> GetCandidateOutput:
+        response = await self.es_repo.search(in_data.index, in_data.field, in_data.keyword)
         logger.info(f"Found {len(response['hits'])} candidates")
 
         return self.parse_response(seed_keyword=in_data.keyword, response=response)

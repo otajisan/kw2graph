@@ -21,7 +21,7 @@ class ElasticsearchRepository(RepositoryBase):
             api_key=self.api_key
         )
 
-    def search(self, index, field, keyword) -> ObjectApiResponse:
+    async def search(self, index, field, keyword, size=RESULTS_SIZE) -> ObjectApiResponse:
         query_dsl = {
             "match": {
                 field: keyword

@@ -84,6 +84,19 @@ interface ShowGraphOutput {
     edges: GraphEdge[];
 }
 
+// Candidate 検索のパラメータを流用
+interface SubmitTaskInput {
+    seed_keyword: string;
+    index: string; // 例: 'videos'
+    field: string; // 例: 'snippet.title'
+    max_titles: number; // 例: 50
+}
+
+interface SubmitTaskOutput {
+    success: boolean;
+    message: string;
+}
+
 // --- 型定義 終わり ---
 
 
@@ -107,6 +120,9 @@ export default function Home() {
     const [isAnalyzePending, startAnalyzeTransition] = useTransition();
     const [isCreatePending, startCreateTransition] = useTransition();
     const [isGraphPending, startGraphTransition] = useTransition();
+
+    const [isSubmitPending, startSubmitTransition] = useTransition();
+    const [submitResult, setSubmitResult] = useState<'idle' | 'submitted' | 'failure'>('idle');
 
     const [createStatus, setCreateStatus] = useState<'idle' | 'success' | 'failure'>('idle');
 
@@ -241,6 +257,37 @@ export default function Home() {
         }
     }, []);
 
+    const fetchSubmitTask = useCallback(async (kw: string, maxTitles: number) => {
+        setSubmitResult('idle');
+        setError(null);
+
+        // ★ FastAPIの SubmitTaskInput に対応するペイロード
+        const payload: SubmitTaskInput = {
+            seed_keyword: kw,
+            index: 'videos',         // 仮定: 固定値
+            field: 'snippet.title',  // 仮定: 固定値
+            max_titles: maxTitles,
+        };
+
+        try {
+            const response = await axios.post<SubmitTaskOutput>(
+                `${API_BASE_URL}/submit_task`, payload,
+                {headers: {'Content-Type': 'application/json'}}
+            );
+
+            if (response.status === 202) {
+                setSubmitResult('submitted');
+                // 成功メッセージはresponse.data.messageを表示すると良い
+            } else {
+                setSubmitResult('failure');
+                setError(`タスク送信失敗: ${response.status} ${response.data.message}`);
+            }
+
+        } catch (err) {
+            setSubmitResult('failure');
+            handleAxiosError(err, 'Submit Task');
+        }
+    }, []);
 
     // --- イベントハンドラ ---
     // (handleGetCandidate, handleAnalyze, handleCreateGraph は省略 - 変更なし)
@@ -314,6 +361,17 @@ export default function Home() {
         }
     };
 
+    // 💡 Submit Task ボタンクリック時の処理
+    const handleSubmitTask = () => {
+        if (!keyword.trim()) {
+            setError('キーワードを入力してください。');
+            return;
+        }
+
+        startSubmitTransition(() => {
+            fetchSubmitTask(keyword, 100); // 例: 最大100件のタイトルを取得する
+        });
+    };
 
     return (
         <Container maxWidth="md" sx={{py: 4, minHeight: '100vh', bgcolor: '#f5f5f5'}}>
@@ -405,6 +463,17 @@ export default function Home() {
                     >
                         {isGraphPending ? '描画中...' : 'Show Graph'}
                     </Button>
+
+                    {/* 💡 Submit Task ボタン */}
+                    <Button
+                        variant="contained"
+                        sx={{bgcolor: '#4527a0', '&:hover': {bgcolor: '#3949ab'}, minWidth: '150px'}}
+                        onClick={handleSubmitTask}
+                        disabled={!keyword.trim() || isSubmitPending || isPending || isAnalyzePending || isCreatePending || isGraphPending}
+                        startIcon={isSubmitPending ? <CircularProgress size={20} color="inherit"/> : null}
+                    >
+                        {isSubmitPending ? '送信中...' : 'Submit Task'}
+                    </Button>
                 </Stack>
 
                 <Divider sx={{mb: 4}}/>
@@ -494,6 +563,11 @@ export default function Home() {
                 {/* Candidate結果の表示 */}
                 {candidateData && (
                     <CandidateResultDisplay data={candidateData}/>
+                )}
+
+                {/* Submit Task結果の表示 */}
+                {submitResult && (
+                    <SubmitResultDisplay status={submitResult} keyword={keyword}/>
                 )}
 
             </Paper>
@@ -736,6 +810,38 @@ const CandidateResultDisplay: React.FC<CandidateResultDisplayProps> = ({data}) =
             </List>
         </Paper>
     );
+};
+
+// ----------------------------------------
+// Submit Task 結果表示コンポーネント
+// ----------------------------------------
+interface SubmitResultDisplayProps {
+    status: 'idle' | 'submitted' | 'failure';
+    keyword: string;
+}
+
+const SubmitResultDisplay: React.FC<SubmitResultDisplayProps> = ({ status, keyword }) => {
+    if (status === 'submitted') {
+        return (
+            <Alert severity="success" sx={{mb: 2}}>
+                <Typography component="p" sx={{fontWeight: 'bold'}}>タスク送信完了 🎉</Typography>
+                <Typography variant="body2">
+                    キーワード「{keyword}」の解析と登録処理をバックグラウンドで開始しました。処理完了後、`Show Graph` ボタンでグラフを確認できます。
+                </Typography>
+            </Alert>
+        );
+    }
+
+    if (status === 'failure') {
+        return (
+            <Alert severity="error" sx={{mb: 2}}>
+                <Typography component="p" sx={{fontWeight: 'bold'}}>❌ タスク送信失敗</Typography>
+                <Typography variant="body2">バックエンドへのタスク送信時にエラーが発生しました。</Typography>
+            </Alert>
+        );
+    }
+
+    return null;
 };
 
 
