@@ -4,8 +4,8 @@ from elastic_transport import ObjectApiResponse
 from kw2graph import config
 from kw2graph.infrastructure.elasticsearch import ElasticsearchRepository
 from kw2graph.domain.base import ServiceBase
-from kw2graph.usecase.input.candidate import GetCandidateInput
-from kw2graph.usecase.output.candidate import GetCandidateOutput
+from kw2graph.usecase.input.get_candidate import GetCandidateInput
+from kw2graph.usecase.output.get_candidate import GetCandidateOutput
 
 logger = structlog.get_logger(__name__)
 

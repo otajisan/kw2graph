@@ -1,18 +1,13 @@
 import structlog
-import asyncio
-from typing import List, Dict, Any
 
 from kw2graph import config
 from kw2graph.domain.contents_fetcher import ContentsFetcherService
 from kw2graph.usecase.base import UseCaseBase
 # 各リポジトリをインポート (DIを想定)
-from kw2graph.infrastructure.elasticsearch import ElasticsearchRepository
-from kw2graph.infrastructure.openai import OpenAiRepository
 from kw2graph.infrastructure.graphdb import GraphDatabaseRepository
-from kw2graph.usecase.input.analyze import AnalyzeKeywordsInput
-from kw2graph.usecase.input.base import InputBase
-from kw2graph.usecase.input.candidate import GetCandidateInput
-from kw2graph.usecase.output.base import OutputBase
+from kw2graph.usecase.input.analyze_keywords import AnalyzeKeywordsInput
+from kw2graph.usecase.input.get_candidate import GetCandidateInput
+from kw2graph.usecase.input.submit_task import SubmitTaskInput
 from kw2graph.util.text_formatter import TextFormatter  # 既に存在
 from kw2graph.domain.keywords_analyzer import KeywordsAnalyzerService  # 既存の分析ロジックを使用
 
@@ -20,19 +15,9 @@ logger = structlog.get_logger(__name__)
 
 
 # 仮定: このユースケースのInput/Outputモデルはシンプル
-class SubmitTaskInput(InputBase):
-    seed_keyword: str
-    index: str
-    field: str
-    max_titles: int = 50  # 取得するタイトルの最大数
 
 
-class SubmitTaskOutput(OutputBase):
-    success: bool
-    message: str
-
-
-class SubmitGraphAnalysisUseCase(UseCaseBase):
+class SubmitTaskUseCase(UseCaseBase):
     def __init__(self, settings: config.Settings,
                  graph_repo: GraphDatabaseRepository):
         super().__init__(settings)

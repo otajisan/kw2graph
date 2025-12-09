@@ -13,17 +13,22 @@ from starlette.status import HTTP_202_ACCEPTED
 from kw2graph import settings
 from kw2graph.infrastructure.graphdb import GraphDatabaseRepository
 from kw2graph.infrastructure.gremlin_manager import GLOBAL_GREMLIN_MANAGER
-from kw2graph.usecase.analyze import AnalyzeKeywordsUseCase
-from kw2graph.usecase.candidate import GetCandidateUseCase
+from kw2graph.usecase.analyze_keywords import AnalyzeKeywordsUseCase
+from kw2graph.usecase.get_candidate import GetCandidateUseCase
 from kw2graph.usecase.create_graph import CreateGraphUseCase
-from kw2graph.usecase.input.analyze import AnalyzeKeywordsInput
-from kw2graph.usecase.input.candidate import GetCandidateInput
+from kw2graph.usecase.input.analyze_keywords import AnalyzeKeywordsInput
+from kw2graph.usecase.input.get_candidate import GetCandidateInput
 from kw2graph.usecase.input.create_graph import CreateGraphInput
-from kw2graph.usecase.output.analyze import AnalyzeKeywordsOutput
-from kw2graph.usecase.output.candidate import GetCandidateOutput
+from kw2graph.usecase.output.analyze_keywords import AnalyzeKeywordsOutput
+from kw2graph.usecase.output.get_candidate import GetCandidateOutput
 from kw2graph.usecase.output.create_graph import CreateGraphOutput
-from kw2graph.usecase.show_graph import ShowGraphInput, ShowGraphUseCase, ShowGraphOutput
-from kw2graph.usecase.submit_task import SubmitTaskOutput, SubmitTaskInput, SubmitGraphAnalysisUseCase
+from kw2graph.usecase.show_graph import ShowGraphUseCase
+from kw2graph.usecase.output.show_graph import ShowGraphOutput
+from kw2graph.usecase.input.show_graph import ShowGraphInput
+from kw2graph.usecase.submit_graph_analysis import SubmitGraphAnalysisUseCase
+from kw2graph.usecase.submit_task import SubmitTaskUseCase
+from kw2graph.usecase.output.submit_task import SubmitTaskOutput
+from kw2graph.usecase.input.submit_task import SubmitTaskInput
 
 logger = structlog.get_logger(__name__)
 
@@ -120,6 +125,8 @@ async def submit_analysis_task(
     # 注意: BackgroundTasksに登録する関数は、引数を直接渡す必要があります。
     # 登録されたタスクは、エンドポイントの応答が返された後に実行されます。
 
+    # NOTE: only 1 or recursive
+    # use_case = SubmitTaskUseCase(settings, graph_repo)
     use_case = SubmitGraphAnalysisUseCase(settings, graph_repo)
 
     # ユースケースの実行関数と引数を登録
@@ -136,19 +143,12 @@ async def submit_analysis_task(
 
 @app.get('/show_graph', response_model=ShowGraphOutput)
 async def show_graph(
-        seed_keyword: str,
-        max_depth: int = 2,
+        request: ShowGraphInput = Depends(),
         repo: GraphDatabaseRepository = Depends(get_graphdb_repository)
 ):  # ★ パラメータを追加
     """
     指定されたキーワードを起点とする関連グラフデータを、指定された深さまで取得する。
     """
-    # GETリクエストのため、クエリパラメータからInputを作成
-    request = ShowGraphInput(
-        seed_keyword=seed_keyword,
-        max_depth=max_depth  # ★ パラメータを追加
-    )
-
     use_case = ShowGraphUseCase(settings, graph_repo=repo)
     response = await use_case.execute(request)
 

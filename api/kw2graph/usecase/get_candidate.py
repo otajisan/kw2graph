@@ -1,8 +1,8 @@
 from kw2graph import config
 from kw2graph.domain.contents_fetcher import ContentsFetcherService
 from kw2graph.usecase.base import UseCaseBase
-from kw2graph.usecase.input.candidate import GetCandidateInput
-from kw2graph.usecase.output.candidate import GetCandidateOutput
+from kw2graph.usecase.input.get_candidate import GetCandidateInput
+from kw2graph.usecase.output.get_candidate import GetCandidateOutput
 
 
 class GetCandidateUseCase(UseCaseBase):

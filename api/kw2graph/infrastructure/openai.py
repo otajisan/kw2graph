@@ -16,7 +16,7 @@ OpenAiExtractionResult = List[Dict[str, Any]]
 
 class OpenAiRepository(RepositoryBase):
     MODEL = "gpt-5-nano"
-    BATCH_SIZE = 10
+    BATCH_SIZE = 100
 
     def __init__(self, settings: config.Settings):
         super().__init__(settings)

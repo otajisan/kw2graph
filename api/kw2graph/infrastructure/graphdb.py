@@ -1,10 +1,11 @@
 import structlog
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set
 
 from gremlin_python.driver import client, serializer
 from gremlin_python.driver.client import Client
 from gremlin_python.driver.resultset import ResultSet
+from gremlin_python.process.graph_traversal import __, constant
 
 from kw2graph import config
 from kw2graph.infrastructure.base import RepositoryBase
@@ -64,31 +65,48 @@ class GraphDatabaseRepository(RepositoryBase):
     async def upsert_node(self, label: str, name: str, properties: Dict[str, Any] = None) -> str:
         """
         指定されたラベルのノードをUpsertし、そのIDを返します。
-
-        :param label: ノードラベル ('Keyword', 'Category', 'Channel'など)
-        :param name: ノードのユニーク名
-        :param properties: 追加で設定するプロパティ ({'type': '固有名詞'}など)
+        ノードが存在する場合も、propertiesを上書き更新します。
         """
         properties = properties or {}
 
-        # プロパティ文字列の構築 (name とその他のプロパティ)
-        prop_parts = f".property('name', '{name}')"
+        # 1. プロパティ更新用の Gremlin ステップを構築 (prop_parts)
+        prop_parts = ""
         for key, value in properties.items():
-            # Gremlinクエリインジェクション対策として、文字列値はエスケープが必要ですが、ここでは簡略化
-            prop_parts += f".property('{key}', '{value}')"
 
-        # Gremlin Upsert クエリの構築
+            if isinstance(value, list):
+                # iab_categoriesなどのマルチプロパティ対応: 各要素に対して property() を繰り返す
+                for item in value:
+                    # Gremlin構文: .property('key', 'value')
+                    quoted_item = f"'{item}'"
+                    prop_parts += f".property('{key}', {quoted_item})"
+
+            elif isinstance(value, str):
+                # entity_typeなどのシングルプロパティ
+                gremlin_value = f"'{value}'"
+                prop_parts += f".property('{key}', {gremlin_value})"
+
+            else:
+                # 数値などのプリミティブ型
+                gremlin_value = str(value)
+                prop_parts += f".property('{key}', {gremlin_value})"
+
+        # 2. Gremlin Upsert クエリの構築: 検索/作成後に属性を適用 (FINAL FIX)
         upsert_query = (
             f"g.V().has('{label}', 'name', '{name}')"
             f".fold().coalesce("
-            f"  unfold(),"  # ノードが存在すればそれを返す
-            f"  addV('{label}').property('name', '{name}'){prop_parts}"  # 存在しなければ作成
-            f").id()"  # 最終的にノードのIDを返す
+            f"  unfold(),"  # 既存ノードを見つける
+            f"  addV('{label}').property('name', '{name}')"  # ノードがなければ 'name' のみで新規作成
+            f")"
+            f"{prop_parts}"  # ★ 修正: coalesce の外で、既存ノードまたは新規ノードの両方にプロパティを適用
+            f".id()"  # 最終的にノードのIDを返す
         )
 
-        results = await self._execute_gremlin(upsert_query)
-        # TinkerPopはIDをLong型で返すことが多いため、str()にキャスト
-        return str(results[0]) if results else None
+        try:
+            results = await self._execute_gremlin(upsert_query)
+            return str(results[0]) if results else None
+        except Exception as e:
+            logger.error("Synchronous Gremlin query execution failed.", query=upsert_query, error=str(e))
+            raise
 
     # -----------------------------------------------------------------
     # ★ 修正: エッジ Upsert メソッドを分離・汎用化 (汎用化)
@@ -145,19 +163,35 @@ class GraphDatabaseRepository(RepositoryBase):
             for item in extracted_data:
                 related_keyword = item['keyword']
                 score = item['score']
-                category = item.get('category')  # GPTがcategoryを返すことを想定
+                entity_type = item.get('entity_type', 'General')  # 存在しない場合は 'General'
+                iab_categories = item.get('iab_categories', [])  # 存在しない場合は空リスト
+
+                # Categoryノード用の名前を取得（IABカテゴリの最初の要素をカテゴリ名として利用する）
+                category_name = iab_categories[0] if iab_categories else None
+
+                # ノードに渡すプロパティを構築
+                node_properties = {
+                    'entity_type': entity_type,
+                    # リスト型プロパティは Gremlin で multi-property として格納される
+                    'iab_categories': iab_categories
+                }
 
                 # A. 関連キーワードノードのUpsert
-                related_node_id = await self.upsert_node(self.NODE_LABEL_KEYWORD, related_keyword)
+                # ★ 修正: 属性を渡してノードをUpsert
+                related_node_id = await self.upsert_node(
+                    self.NODE_LABEL_KEYWORD,
+                    related_keyword,
+                    properties=node_properties
+                )
 
                 if related_node_id:
                     # B. RELATED_TO エッジのUpsert (GPTスコアを使用)
                     await self.upsert_edge(seed_node_id, related_node_id, self.EDGE_LABEL_RELATED, score=score)
 
-                    # C. IS_A エッジのUpsert (カテゴリ階層)
-                    if category:
-                        # CategoryノードのUpsert
-                        category_node_id = await self.upsert_node(self.NODE_LABEL_CATEGORY, category)
+                    # C. IS_A エッジのUpsert (カテゴリ階層: IABのTier 1をCategoryノードとして利用)
+                    if category_name:
+                        # CategoryノードのUpsert (カテゴリ名は IAB Tier 1 を利用)
+                        category_node_id = await self.upsert_node(self.NODE_LABEL_CATEGORY, category_name)
                         if category_node_id:
                             # 関連キーワードからカテゴリへの階層エッジを登録 (スコアは不要)
                             await self.upsert_edge(related_node_id, category_node_id, self.EDGE_LABEL_IS_A)
@@ -210,19 +244,20 @@ class GraphDatabaseRepository(RepositoryBase):
         # 3. ノード取得クエリの実行
         # ----------------------------------------------------
 
-        # ノード取得クエリ: (安定版をベースにフィルタを追加)
+        # ノード取得クエリ: (最終修正版 - constant() を使用)
         nodes_query = (
             f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'name', '{seed_keyword}')"
-            f"{node_filter_parts}.as('start')."  # 始点ノードにフィルタを適用
+            f"{node_filter_parts}.as('start')."
             f"repeat(both('{self.EDGE_LABEL_RELATED}')).times({max_depth}).emit()."
             f"union(identity(), select('start'))."
             f"dedup()"
-            f"{node_filter_parts}"  # 移動後のノードにもフィルタを適用
-            f".project('id', 'name', 'entity_type', 'iab_categories')"  # 必要なプロパティも取得
+            f"{node_filter_parts}"
+            f".project('id', 'name', 'entity_type', 'iab_categories')"
             f".by(id())"
             f".by(coalesce(values('name'), constant('')))"
-            f".by(coalesce(values('entity_type'), constant('')))"
-            f".by(coalesce(values('iab_categories'), constant([])))"  # リストプロパティを返却
+
+            f".by(coalesce(values('entity_type'), __.constant('')))"  # __.constant('') を使用
+            f".by(values('iab_categories').fold().coalesce(unfold(), __.constant([])))"  # __.constant([]) を使用
             f".toList()"
         )
 
@@ -261,6 +296,22 @@ class GraphDatabaseRepository(RepositoryBase):
 
         # ノード整形 (Long IDをStringに、nameをlabelに, プロパティを追加)
         for item in raw_nodes:
+            iab_categories_raw = item.get('iab_categories')
+
+            # 💡 修正: iab_categories がリストでない (単一の文字列である) 場合はリスト化
+            if iab_categories_raw is None:
+                # Gremlinから何も返されなかった場合（属性なしノード）
+                final_iab_categories = []
+            elif isinstance(iab_categories_raw, str):
+                # 単一の文字列が返された場合（プロパティが一つだけの場合）
+                final_iab_categories = [iab_categories_raw]
+            elif not isinstance(iab_categories_raw, list):
+                # リストでないが None/str でもない予期せぬ型の場合、リストに変換 (安全策)
+                final_iab_categories = [str(iab_categories_raw)]
+            else:
+                # 既にリストである場合
+                final_iab_categories = iab_categories_raw
+
             node_id = str(item.get('id'))
             if node_id not in nodes:
                 nodes[node_id] = {
@@ -268,7 +319,7 @@ class GraphDatabaseRepository(RepositoryBase):
                     "label": item.get('name'),
                     "group": self.NODE_LABEL_KEYWORD,  # ノードラベルは 'Keyword' で固定
                     "entity_type": item.get('entity_type'),  # ★ 新しいプロパティ
-                    "iab_categories": item.get('iab_categories')  # ★ 新しいプロパティ
+                    "iab_categories": final_iab_categories  # ★ 新しいプロパティ
                 }
 
         # エッジ整形 (Long IDをStringに、BigDecimalをFloatに)
@@ -288,7 +339,93 @@ class GraphDatabaseRepository(RepositoryBase):
                 "score": score_float
             })
 
-        # 最終的に、フィルタリングされたノードとエッジの接続を確保するため、
-        # エッジリストに含まれるノードのみを nodes から抽出することが理想的ですが、
-        # Gremlin側でフィルタリングしているため、ここでは単純にノードを返します。
-        return {"nodes": list(nodes.values()), "edges": edges}
+        # 6. 結果の整形（Python側で結合と型変換）
+        nodes = {}
+        edges = []
+
+        # ... (既存のノード整形ロジック)
+        for item in raw_nodes:
+            # ... (iab_categories のリスト化ロジック)
+
+            node_id = str(item.get('id'))
+            if node_id not in nodes:
+                nodes[node_id] = {
+                    "id": node_id,
+                    "label": item.get('name'),
+                    "group": self.NODE_LABEL_KEYWORD,
+                    "entity_type": item.get('entity_type'),
+                    "iab_categories": final_iab_categories
+                }
+
+        # ... (既存のエッジ整形ロジック)
+        for item in raw_edges:
+            # ... (スコアのfloat変換ロジック)
+
+            edges.append({
+                "id": str(item.get('id')),
+                "from_node": str(item.get('from_id')),
+                "to_node": str(item.get('to_id')),
+                "score": score_float
+            })
+
+        # ----------------------------------------------------
+        # 7. 【追加】孤立ノードの除去 (Orphan Node Removal)
+        # ----------------------------------------------------
+
+        # a. フィルタリングされたエッジに含まれるノードIDを収集
+        connected_node_ids: Set[str] = set()
+        for edge in edges:
+            # エッジが残っているなら、その両端のノードは接続されている
+            connected_node_ids.add(edge['from_node'])
+            connected_node_ids.add(edge['to_node'])
+
+        # b. 接続されたノードのみをフィルタリングして最終リストを作成
+        final_nodes = []
+        for node_id, node_data in nodes.items():
+            # Edgeのいずれかの端点に含まれるノードのみを採用
+            if node_id in connected_node_ids:
+                final_nodes.append(node_data)
+
+        # 最終的な戻り値として、フィルタリングされたノードとエッジを返す
+        return {"nodes": final_nodes, "edges": edges}  # nodes.values() ではなく final_nodes を使用する
+
+    async def get_new_and_eligible_keywords(self,
+                                            seed_keyword: str,
+                                            min_score: float,
+                                            entity_type: str,
+                                            max_depth: int = 1) -> List[str]:
+        """
+        指定された条件に合致し、かつ、まだ起点キーワードとして登録されていない
+        新しい（New）の関連キーワードをGraphDBから発見します。
+
+        この処理はブロッキングなので、asyncio.to_thread で呼び出されます。
+
+        :return: 条件を満たす新規キーワードのリスト
+        """
+
+        # 1. フィルタリング条件の定義
+        # - entity_typeが指定値であること
+        # - scoreがmin_score以上であること
+
+        # 2. Gremlin クエリの構築
+        # (1) 起点キーワードV1から関連エッジを辿り、ノードV2に到達
+        # (2) V2が指定された entity_type を持つことを確認
+        # (3) V1->V2のエッジが min_score 以上であることを確認
+        # (4) V2を起点として「まだRELATED_TOエッジが出されていない」ことを確認 (新規性チェック)
+
+        query = (
+            f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'name', '{seed_keyword}')."
+            f"outE('{self.EDGE_LABEL_RELATED}').has('score', gt({min_score})).inV().as('target')."
+            f"has('entity_type', '{entity_type}')."
+            f"where(outE('{self.EDGE_LABEL_RELATED}').count().is(0))."  # 💡 新規性チェック: ターゲットノードから外向きのエッジがないこと（つまり、まだ起点として使われていない）
+            f"values('name').toList()"
+        )
+
+        try:
+            results = await asyncio.to_thread(self._sync_execute_gremlin, query)
+            # results はキーワード名 (str) のリスト
+            return [str(name) for name in results]
+
+        except Exception as e:
+            logger.error("Failed to fetch new eligible keywords from Gremlin.", error=str(e))
+            return []

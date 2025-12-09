@@ -1,7 +1,7 @@
 from kw2graph.domain.keywords_analyzer import KeywordsAnalyzerService
 from kw2graph.usecase.base import UseCaseBase
-from kw2graph.usecase.input.analyze import AnalyzeKeywordsInput
-from kw2graph.usecase.output.analyze import AnalyzeKeywordsOutput
+from kw2graph.usecase.input.analyze_keywords import AnalyzeKeywordsInput
+from kw2graph.usecase.output.analyze_keywords import AnalyzeKeywordsOutput
 
 
 class AnalyzeKeywordsUseCase(UseCaseBase):

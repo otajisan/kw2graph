@@ -6,14 +6,16 @@ import structlog
 from kw2graph import config
 from kw2graph.domain.base import ServiceBase
 from kw2graph.infrastructure.openai import OpenAiRepository, OpenAiExtractionResult
-from kw2graph.usecase.input.analyze import AnalyzeKeywordsInput
-from kw2graph.usecase.output.analyze import AnalyzeKeywordsOutput, AnalyzeKeywordsOutputItem
+from kw2graph.usecase.input.analyze_keywords import AnalyzeKeywordsInput
+from kw2graph.usecase.output.analyze_keywords import AnalyzeKeywordsOutput, AnalyzeKeywordsOutputItem
 from kw2graph.util.text_formatter import TextFormatter
 
 logger = structlog.get_logger(__name__)
 
 
 class KeywordsAnalyzerService(ServiceBase):
+    TOP_N_LIMIT = 5
+
     def __init__(self, settings: config.Settings):
         super().__init__(settings)
         self.openai_repo = OpenAiRepository(settings)
@@ -47,7 +49,22 @@ class KeywordsAnalyzerService(ServiceBase):
             )
 
         logger.info(f"Extracted {len(response)} related keywords")
-        return self.parse_response(seed_keyword=in_data.seed_keyword, response=response)
+        parsed_output = self.parse_response(seed_keyword=in_data.seed_keyword, response=response)
+        sorted_results = sorted(
+            parsed_output.results,
+            key=lambda item: item.score,
+            reverse=True
+        )
+        # 上位 N 件に制限
+        top_n_results = sorted_results[:self.TOP_N_LIMIT]
+
+        logger.info(f"Filtered to top {self.TOP_N_LIMIT} keywords.", count=len(top_n_results),
+                    seed=in_data.seed_keyword)
+
+        return AnalyzeKeywordsOutput(
+            seed_keyword=in_data.seed_keyword,
+            results=top_n_results,
+        )
 
     @staticmethod
     def parse_response(seed_keyword: str, response: OpenAiExtractionResult) -> AnalyzeKeywordsOutput:

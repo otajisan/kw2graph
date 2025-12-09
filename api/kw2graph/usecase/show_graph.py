@@ -1,40 +1,9 @@
-from typing import List, Dict, Any
 from kw2graph import config
 from kw2graph.domain.graph_fetcher import GraphFetcherService
 from kw2graph.infrastructure.graphdb import GraphDatabaseRepository
 from kw2graph.usecase.base import UseCaseBase
-from kw2graph.usecase.input.base import InputBase
-from kw2graph.usecase.output.base import OutputBase
-from pydantic import Field
-
-
-# --- Input/Output モデル定義 ---
-
-class ShowGraphInput(InputBase):
-    """グラフ表示の起点となるキーワードと深さ"""
-    seed_keyword: str
-    max_depth: int = 2  # デフォルト値を設定
-    min_score: float = 0.0
-    entity_type: str | None = None
-    iab_category: str | None = None
-
-
-class Node(OutputBase):
-    id: str
-    label: str
-    group: str
-
-
-class Edge(OutputBase):
-    id: str
-    from_node: str  # キー名を Gremlin の出力に合わせて from_node に統一
-    to_node: str  # キー名を Gremlin の出力に合わせて to_node に統一
-    score: float
-
-
-class ShowGraphOutput(OutputBase):
-    nodes: List[Node]
-    edges: List[Edge]
+from kw2graph.usecase.input.show_graph import ShowGraphInput
+from kw2graph.usecase.output.show_graph import ShowGraphOutput
 
 
 class ShowGraphUseCase(UseCaseBase):
@@ -44,10 +13,7 @@ class ShowGraphUseCase(UseCaseBase):
 
     async def execute(self, in_data: ShowGraphInput) -> ShowGraphOutput:
         # ドメインサービスからグラフデータを取得
-        graph_data = await self.fetcher.fetch(
-            in_data.seed_keyword,
-            in_data.max_depth  # ★ パラメータを追加
-        )
+        graph_data = await self.fetcher.fetch(in_data)
         # 辞書の結果をPydanticモデルに変換して返す
         return ShowGraphOutput(
             nodes=graph_data.get('nodes', []),
