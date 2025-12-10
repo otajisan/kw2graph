@@ -70,6 +70,7 @@ interface GraphNode {
     group: string;
     entity_type: string;
     iab_categories: string[];
+    original_name: string;
 }
 
 interface GraphEdge {
@@ -924,6 +925,7 @@ const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = 
 
             // ツールチップにすべての属性を含める
             const nodeTitle = `
+                <strong>Original:</strong> ${node.original_name}<br/>
                 <strong>Keyword:</strong> ${node.label}<br/>
                 <strong>Type:</strong> ${node.entity_type || 'N/A'}<br/>
                 <strong>IAB:</strong> ${(node.iab_categories || []).join(', ')}
@@ -931,7 +933,7 @@ const GraphVisualizationComponent: React.FC<GraphVisualizationComponentProps> = 
 
             return {
                 id: node.id,
-                label: node.label,
+                label: node.original_name,
                 group: nodeGroup,
                 title: nodeTitle,
             };

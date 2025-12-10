@@ -9,6 +9,7 @@ class Node(OutputBase):
     group: str
     entity_type: str
     iab_categories: List[str] | None
+    original_name: str
 
 
 class Edge(OutputBase):

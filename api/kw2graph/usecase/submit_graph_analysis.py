@@ -1,5 +1,6 @@
 import asyncio
 
+import re
 import structlog
 
 from kw2graph import config
@@ -94,12 +95,13 @@ class SubmitGraphAnalysisUseCase(UseCaseBase):
         # 2. 発見された各キーワードに対して並列で解析と登録を実行
         tasks = []
         for new_kw in new_keywords:
+            cleaned_seed_keyword = self._clean_keyword_context(new_kw)
             # 新しいキーワードを起点とするタスクを準備
             new_input = SubmitTaskInput(
-                seed_keyword=new_kw,
+                seed_keyword=cleaned_seed_keyword,
                 index=in_data.index,
                 field=in_data.field,
-                max_titles=50  # タイトル数は設定値を利用
+                max_titles=in_data.max_titles  # タイトル数は設定値を利用
             )
             # 各タスクは _process_single_keyword を実行する
             tasks.append(self._process_single_keyword(new_input))
@@ -158,3 +160,9 @@ class SubmitGraphAnalysisUseCase(UseCaseBase):
             channel_name=channel_name
         )
         return success
+
+    @staticmethod
+    def _clean_keyword_context(keyword: str) -> str:
+        """キーワードから末尾の括弧書きの文脈情報 (例: ' (ちいかわの文脈)') を削除する。"""
+        # 正規表現: 末尾の ' (' から ')' までを非貪欲にマッチさせ、削除
+        return re.sub(r' \([^)]+\)$', '', keyword).strip()

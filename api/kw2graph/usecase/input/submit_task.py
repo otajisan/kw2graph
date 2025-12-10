@@ -5,4 +5,4 @@ class SubmitTaskInput(InputBase):
     seed_keyword: str
     index: str
     field: str
-    max_titles: int = 50  # 取得するタイトルの最大数
+    max_titles: int = 100  # 取得するタイトルの最大数

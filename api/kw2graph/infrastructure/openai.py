@@ -18,6 +18,14 @@ class OpenAiRepository(RepositoryBase):
     MODEL = "gpt-5-nano"
     BATCH_SIZE = 100
 
+    IAB_CATEGORIES = [
+        "Arts & Entertainment", "Automotive", "Business", "Careers", "Education",
+        "Family & Relationships", "Food & Drink", "Health & Fitness", "Hobbies & Interests",
+        "Home & Garden", "Law, Govt & Politics", "News", "Personal Finance", "Pets",
+        "Science", "Shopping", "Sports", "Style & Fashion", "Technology & Computing",
+        "Travel", "Video Gaming", "Other"
+    ]
+
     def __init__(self, settings: config.Settings):
         super().__init__(settings)
         self.client = OpenAI(api_key=settings.openai_api_key)
@@ -121,19 +129,11 @@ class OpenAiRepository(RepositoryBase):
         logger.debug(f"Generating prompt: \n{prompt}")
         return prompt
 
-    @staticmethod
-    def _generate_prompt_old4(seed_keyword: str, titles: List[str]) -> str:
+    def _generate_prompt_old4(self, seed_keyword: str, titles: List[str]) -> str:
         titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
 
         # 広告業界標準の IAB Tier 1 カテゴリリスト
-        IAB_CATEGORIES = [
-            "Arts & Entertainment", "Automotive", "Business", "Careers", "Education",
-            "Family & Relationships", "Food & Drink", "Health & Fitness", "Hobbies & Interests",
-            "Home & Garden", "Law, Govt & Politics", "News", "Personal Finance", "Pets",
-            "Science", "Shopping", "Sports", "Style & Fashion", "Technology & Computing",
-            "Travel", "Video Gaming", "Other"
-        ]
-        iab_list_str = ", ".join(IAB_CATEGORIES)
+        iab_list_str = ", ".join(self.IAB_CATEGORIES)
 
         prompt = f"""
         あなたはキーワード抽出、階層分析、および標準化された分類を専門とするエキスパートAIです。
@@ -183,19 +183,11 @@ class OpenAiRepository(RepositoryBase):
         logger.debug(f"Generating prompt: \n{prompt}")
         return prompt
 
-    @staticmethod
-    def _generate_prompt(seed_keyword: str, titles: List[str]) -> str:
+    def _generate_prompt_old5(self, seed_keyword: str, titles: List[str]) -> str:
         titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
 
         # IAB カテゴリリストはそのまま維持（必須情報）
-        IAB_CATEGORIES = [
-            "Arts & Entertainment", "Automotive", "Business", "Careers", "Education",
-            "Family & Relationships", "Food & Drink", "Health & Fitness", "Hobbies & Interests",
-            "Home & Garden", "Law, Govt & Politics", "News", "Personal Finance", "Pets",
-            "Science", "Shopping", "Sports", "Style & Fashion", "Technology & Computing",
-            "Travel", "Video Gaming", "Other"
-        ]
-        iab_list_str = ", ".join(IAB_CATEGORIES)
+        iab_list_str = ", ".join(self.IAB_CATEGORIES)
 
         prompt = f"""
         コンテンツタイトル群を分析し、シードキーワード「{seed_keyword}」に関する以下の属性を持つ語句を抽出し、JSON形式でリスト化してください。
@@ -237,8 +229,63 @@ class OpenAiRepository(RepositoryBase):
         logger.debug(f"Generating prompt: \n{prompt}")
         return prompt
 
+    def _generate_prompt(self, seed_keyword: str, titles: List[str]) -> str:
+        titles_str = "\n".join([f"{i + 1}. {title}" for i, title in enumerate(titles)])
+
+        # IAB カテゴリリストはそのまま維持（必須情報）
+        iab_list_str = ", ".join(self.IAB_CATEGORIES)
+
+        prompt = f"""
+        コンテンツタイトル群を分析し、シードキーワード「{seed_keyword}」に関する以下の属性を持つ語句を抽出し、JSON形式でリスト化してください。
+        #シードキーワード: {seed_keyword}
+
+        #コンテンツタイトル群:
+        {titles_str}
+
+        #事前ステップ
+        1. **主題の特定**: 提供されたタイトル群から、この解析の**最も主要な主題、作品名、またはブランド名**を特定する。この主題名を「固定文脈」として以下のルールに適用する。
+
+        【IAB Tier 1 カテゴリ リスト】: {iab_list_str}
+
+        #抽出と分類のルール
+        * **語句 (keyword)**: 
+            1. タイトル群の**上位概念/主題**（例: ちいかわ、アニメ）を抽出する。
+            2. シードキーワードを**修飾する具体的かつ独立した語句**（例: 部品名、エピソード名）を、シードキーワードを含めずに**徹底して分解**し抽出する。
+        * **【最重要ルール：多義語の文脈保持】**: 抽出された語句が、この解析で特定された**固定文脈**に固有である多義語（例：「うさぎ」「ES」など）である場合、**キーワードの末尾に「 (固定文脈名)」という括弧書きを追加**してください。
+            * **例**: 固定文脈が「ちいかわ」の場合、「うさぎ」は「うさぎ (ちいかわ)」とする。
+        * **元の語句 (original_name)**: **括弧書きを削除した、元の語句**を必ず含めてください。
+        * **関連度 (score)**: 0.0〜1.0 の間で付与する。上位概念には最も高いスコアを付与する。
+        * **エンティティ種別 (entity_type)**: 固有名詞（作品名、商品名など）は 'Proper'、一般的名詞/概念は 'General' とする。
+        * **IABカテゴリ (iab_categories)**: 以下の【IAB Tier 1 カテゴリ リスト】から、**最大3つ**をリストとして選択する。
+
+        #JSON出力形式:
+        {{
+          "related_keywords": [
+            {{
+              "keyword": "抽出された語句 (文脈付き)", 
+              "original_name": "元の語句 (括弧なし)", // ★ 追加
+              "score": 関連度スコア, 
+              "iab_categories": ["カテゴリ1"],
+              "entity_type": "Proper/General"        
+            }},
+            // ...
+          ]
+        }}
+
+        #出力例 (シードキーワードが「ハチワレ」の場合の期待値, 固定文脈:「ちいかわ」):
+        {{
+          "related_keywords": [
+            {{"keyword": "ちいかわ", "original_name": "ちいかわ", "score": 0.98, "iab_categories": ["Arts & Entertainment"], "entity_type": "Proper"}},
+            {{"keyword": "うさぎ (ちいかわ)", "original_name": "うさぎ", "score": 0.95, "iab_categories": ["Arts & Entertainment"], "entity_type": "Proper"}},
+            // ...
+          ]
+        }}
+        """
+        return prompt
+
     def extract_related_keywords(self, seed_keyword: str, titles: List[str]) -> OpenAiExtractionResult:
         prompt = self._generate_prompt(seed_keyword, titles)
+        logger.debug(f"Generating prompt: \n{prompt}")
 
         try:
             logger.info(f"Extracting related keywords: {seed_keyword}")

@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Set
 from gremlin_python.driver import client, serializer
 from gremlin_python.driver.client import Client
 from gremlin_python.driver.resultset import ResultSet
-from gremlin_python.process.graph_traversal import __, constant
+from gremlin_python.process.graph_traversal import __
 
 from kw2graph import config
 from kw2graph.infrastructure.base import RepositoryBase
@@ -147,7 +147,11 @@ class GraphDatabaseRepository(RepositoryBase):
 
         try:
             # 1. シードキーワードノードのUpsert
-            seed_node_id = await self.upsert_node(self.NODE_LABEL_KEYWORD, seed_keyword)
+            seed_node_id = await self.upsert_node(
+                self.NODE_LABEL_KEYWORD,
+                seed_keyword,
+                properties={'original_name': seed_keyword}
+            )
             if not seed_node_id:
                 logger.error("Failed to upsert seed keyword node.", keyword=seed_keyword)
                 return False
@@ -166,6 +170,7 @@ class GraphDatabaseRepository(RepositoryBase):
                 entity_type = item.get('entity_type', 'General')  # 存在しない場合は 'General'
                 iab_categories = item.get('iab_categories', [])  # 存在しない場合は空リスト
 
+                original_name = item.get('original_name', related_keyword.split(' (')[0].strip())  # ない場合は括弧前を取得
                 # Categoryノード用の名前を取得（IABカテゴリの最初の要素をカテゴリ名として利用する）
                 category_name = iab_categories[0] if iab_categories else None
 
@@ -173,7 +178,8 @@ class GraphDatabaseRepository(RepositoryBase):
                 node_properties = {
                     'entity_type': entity_type,
                     # リスト型プロパティは Gremlin で multi-property として格納される
-                    'iab_categories': iab_categories
+                    'iab_categories': iab_categories,
+                    'original_name': original_name,
                 }
 
                 # A. 関連キーワードノードのUpsert
@@ -246,18 +252,17 @@ class GraphDatabaseRepository(RepositoryBase):
 
         # ノード取得クエリ: (最終修正版 - constant() を使用)
         nodes_query = (
-            f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'name', '{seed_keyword}')"
-            f"{node_filter_parts}.as('start')."
+            f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'original_name', '{seed_keyword}').as('start')."
             f"repeat(both('{self.EDGE_LABEL_RELATED}')).times({max_depth}).emit()."
             f"union(identity(), select('start'))."
             f"dedup()"
             f"{node_filter_parts}"
-            f".project('id', 'name', 'entity_type', 'iab_categories')"
+            f".project('id', 'name', 'entity_type', 'iab_categories', 'original_name')"
             f".by(id())"
-            f".by(coalesce(values('name'), constant('')))"
-
+            f".by(coalesce(values('name'), __.constant('')))"
             f".by(coalesce(values('entity_type'), __.constant('')))"  # __.constant('') を使用
             f".by(values('iab_categories').fold().coalesce(unfold(), __.constant([])))"  # __.constant([]) を使用
+            f".by(coalesce(values('original_name'), __.constant('')))"
             f".toList()"
         )
 
@@ -267,10 +272,11 @@ class GraphDatabaseRepository(RepositoryBase):
 
         # エッジ取得クエリ: (安定版をベースにスコアフィルタを追加)
         edges_query = (
-            f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'name', '{seed_keyword}')."
-            f"repeat(bothE('{self.EDGE_LABEL_RELATED}').otherV()).times({max_depth})."
-            f"bothE('{self.EDGE_LABEL_RELATED}').dedup()"
-            f"{edge_filter_parts}"  # エッジフィルタ（min_score）を適用
+            f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'original_name', '{seed_keyword}')."
+            f"repeat("
+                f"bothE('{self.EDGE_LABEL_RELATED}'){edge_filter_parts}.otherV()"
+            f").times({max_depth})."
+            f"bothE('{self.EDGE_LABEL_RELATED}'){edge_filter_parts}.dedup()"
             f".project('id', 'score', 'from_id', 'to_id')"
             f".by(id())"
             f".by(coalesce(values('score'), constant(0.0)))"
@@ -294,8 +300,8 @@ class GraphDatabaseRepository(RepositoryBase):
         nodes = {}
         edges = []
 
-        # ノード整形 (Long IDをStringに、nameをlabelに, プロパティを追加)
         for item in raw_nodes:
+
             iab_categories_raw = item.get('iab_categories')
 
             # 💡 修正: iab_categories がリストでない (単一の文字列である) 場合はリスト化
@@ -317,12 +323,12 @@ class GraphDatabaseRepository(RepositoryBase):
                 nodes[node_id] = {
                     "id": node_id,
                     "label": item.get('name'),
-                    "group": self.NODE_LABEL_KEYWORD,  # ノードラベルは 'Keyword' で固定
-                    "entity_type": item.get('entity_type'),  # ★ 新しいプロパティ
-                    "iab_categories": final_iab_categories  # ★ 新しいプロパティ
+                    "group": self.NODE_LABEL_KEYWORD,
+                    "entity_type": item.get('entity_type'),
+                    "iab_categories": final_iab_categories,
+                    "original_name": item.get('original_name', item.get('name', ''))
                 }
 
-        # エッジ整形 (Long IDをStringに、BigDecimalをFloatに)
         for item in raw_edges:
             score_value = item.get('score')
 
@@ -331,35 +337,6 @@ class GraphDatabaseRepository(RepositoryBase):
                 score_float = float(score_value.unscaled_value) / (10 ** score_value.scale)
             else:
                 score_float = float(score_value)
-
-            edges.append({
-                "id": str(item.get('id')),
-                "from_node": str(item.get('from_id')),
-                "to_node": str(item.get('to_id')),
-                "score": score_float
-            })
-
-        # 6. 結果の整形（Python側で結合と型変換）
-        nodes = {}
-        edges = []
-
-        # ... (既存のノード整形ロジック)
-        for item in raw_nodes:
-            # ... (iab_categories のリスト化ロジック)
-
-            node_id = str(item.get('id'))
-            if node_id not in nodes:
-                nodes[node_id] = {
-                    "id": node_id,
-                    "label": item.get('name'),
-                    "group": self.NODE_LABEL_KEYWORD,
-                    "entity_type": item.get('entity_type'),
-                    "iab_categories": final_iab_categories
-                }
-
-        # ... (既存のエッジ整形ロジック)
-        for item in raw_edges:
-            # ... (スコアのfloat変換ロジック)
 
             edges.append({
                 "id": str(item.get('id')),
