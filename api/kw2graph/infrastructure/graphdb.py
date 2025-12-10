@@ -274,7 +274,7 @@ class GraphDatabaseRepository(RepositoryBase):
         edges_query = (
             f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'original_name', '{seed_keyword}')."
             f"repeat("
-                f"bothE('{self.EDGE_LABEL_RELATED}'){edge_filter_parts}.otherV()"
+            f"bothE('{self.EDGE_LABEL_RELATED}'){edge_filter_parts}.otherV()"
             f").times({max_depth})."
             f"bothE('{self.EDGE_LABEL_RELATED}'){edge_filter_parts}.dedup()"
             f".project('id', 'score', 'from_id', 'to_id')"
@@ -365,6 +365,176 @@ class GraphDatabaseRepository(RepositoryBase):
 
         # 最終的な戻り値として、フィルタリングされたノードとエッジを返す
         return {"nodes": final_nodes, "edges": edges}  # nodes.values() ではなく final_nodes を使用する
+
+        # -----------------------------------------------------------------
+        # ★ 新規追加機能: 複数キーワード x 共通ノード探索 (AND条件)
+        # -----------------------------------------------------------------
+
+    async def fetch_common_nodes(
+            self,
+            seed_keywords: List[str],
+            min_score: float = 0.0,
+            entity_type: str | None = None,
+            iab_category: str | None = None
+    ) -> GraphData:
+
+        if not seed_keywords or len(seed_keywords) < 2:
+            logger.warning("Common node search requires at least two keywords.", count=len(seed_keywords))
+            return {"nodes": [], "edges": []}
+
+        logger.info("Fetching graph data (Common Node Search).", seed_keywords=seed_keywords, min_score=min_score)
+
+        # Groovy形式のリストに変換 (例: ['YouTuber', '釣り'] -> '["YouTuber", "釣り"]')
+        keywords_for_groovy = str(seed_keywords).replace("'", '"')
+
+        # フィルタリング条件の構築 (fetch_related_graph と同様)
+        node_filter_parts = ""
+        if entity_type:
+            node_filter_parts += f".has('entity_type', '{entity_type}')"
+        if iab_category:
+            node_filter_parts += f".where(values('iab_categories').unfold().is('{iab_category}'))"
+
+        edge_filter_parts = f".has('score', gt({min_score}))"
+
+        # ----------------------------------------------------
+        # 共通ノード探索トラバーサルの構築 (AND条件)
+        # ----------------------------------------------------
+
+        first_keyword = seed_keywords[0]
+
+        # その他のキーワードに対する AND 条件の構築
+        and_traversals = []
+        for kw in seed_keywords[1:]:
+            # __.both().has('original_name', kw) というトラバーサルが成功するかチェック
+            and_traversals.append(
+                f"__.both('{self.EDGE_LABEL_RELATED}').has('original_name', '{kw}')"
+            )
+
+        # AND条件が一つ以上ある場合に and() ステップを構築
+        # where(__.and(...)) の中のトラバーサル部分を定義
+        and_traversal_content = f"__.and({','.join(and_traversals)})"
+        and_filter_part = f".where({and_traversal_content})" if and_traversals else ""
+
+        # ----------------------------------------------------
+        # 3. ノード取得クエリ (共通ノードとシードノードの両方を取得)
+        # ----------------------------------------------------
+
+        nodes_query = (
+            # 1. 最初のキーワードを起点とし、関連ノードへ進む (スコアフィルタを適用)
+            f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'original_name', '{first_keyword}')."
+            f"bothE('{self.EDGE_LABEL_RELATED}'){edge_filter_parts}.otherV().as('common_node')"
+
+            # 2. 他の全てのキーワードからも到達可能であることを and() で検証
+            f"{and_filter_part}"  # .where(__.and(...)) が適用される
+
+            # 3. ノードレベルのフィルタを適用
+            f"{node_filter_parts}"
+
+            # 4. 共通ノード、および元のシードノード群を取得し、重複除去
+            # トラバーサルの安定化のため、直前の select() は不要な場合が多いため削除し、union() を直接結合
+            f".union("
+            f"identity(), select('common_node'), "
+            f"__.V().has('{self.NODE_LABEL_KEYWORD}', 'original_name', within({keywords_for_groovy}))"
+            f").dedup()"
+
+            # プロジェクション
+            f".project('id', 'name', 'entity_type', 'iab_categories', 'original_name')"
+            f".by(id())"
+            f".by(coalesce(values('name'), __.constant('')))"
+            f".by(coalesce(values('entity_type'), __.constant('')))"
+            f".by(values('iab_categories').fold().coalesce(unfold(), __.constant([])))"
+            f".by(coalesce(values('original_name'), __.constant('')))"
+            f".toList()"
+        )
+
+        # ----------------------------------------------------
+        # 4. エッジ取得クエリ (シードノードと共通ノード群の間のエッジのみ)
+        # ----------------------------------------------------
+
+        edges_query = (
+            f"g.V().has('{self.NODE_LABEL_KEYWORD}', 'original_name', within({keywords_for_groovy})).as('a')."
+            f"bothE('{self.EDGE_LABEL_RELATED}').as('e')."
+
+            # 💡 修正: 共通ノード（common_node）へのエッジであるかをチェックするロジックを、
+            #         代わりにノードクエリの結果（raw_nodes）に含まれるノードへ接続しているかで判断すべき
+            #         しかし、Gremlin単体でやるため、ここではノードクエリで取得したノードリスト（V）に接続しているかを見る
+            #         まずはシンプルなエッジ取得クエリに戻す。
+            f"where(__.otherV().hasLabel('{self.NODE_LABEL_KEYWORD}'))"  # 相手がKeywordであることを確認
+            f".select('e')"
+            f"{edge_filter_parts}.dedup()"  # min_scoreフィルタと重複除去
+
+            f".project('id', 'score', 'from_id', 'to_id')"
+            f".by(id())"
+            f".by(coalesce(values('score'), constant(0.0)))"
+            f".by(__.outV().id())"
+            f".by(__.inV().id())"
+            f".toList()"
+        )
+
+        # ----------------------------------------------------
+        # 5. 実行と結果の整形 (ステップ 5, 6, 7 はそのまま)
+        # ----------------------------------------------------
+
+        try:
+            raw_nodes = await self._execute_gremlin(nodes_query)
+            raw_edges = await self._execute_gremlin(edges_query)
+        except Exception as e:
+            logger.error("Failed to fetch graph data from Gremlin (Common Node Query).", error=str(e))
+            return {"nodes": [], "edges": []}
+
+        # 6. 結果の整形（Python側で結合と型変換）
+        nodes = {}
+        edges = []
+
+        for item in raw_nodes:
+            iab_categories_raw = item.get('iab_categories')
+            if iab_categories_raw is None:
+                final_iab_categories = []
+            elif isinstance(iab_categories_raw, str):
+                final_iab_categories = [iab_categories_raw]
+            elif not isinstance(iab_categories_raw, list):
+                final_iab_categories = [str(iab_categories_raw)]
+            else:
+                final_iab_categories = iab_categories_raw
+
+            node_id = str(item.get('id'))
+            if node_id not in nodes:
+                nodes[node_id] = {
+                    "id": node_id,
+                    "label": item.get('name'),
+                    "group": self.NODE_LABEL_KEYWORD,
+                    "entity_type": item.get('entity_type'),
+                    "iab_categories": final_iab_categories,
+                    "original_name": item.get('original_name', item.get('name', ''))
+                }
+
+        for item in raw_edges:
+            score_value = item.get('score')
+
+            if hasattr(score_value, 'unscaled_value') and hasattr(score_value, 'scale'):
+                score_float = float(score_value.unscaled_value) / (10 ** score_value.scale)
+            else:
+                score_float = float(score_value)
+
+            edges.append({
+                "id": str(item.get('id')),
+                "from_node": str(item.get('from_id')),
+                "to_node": str(item.get('to_id')),
+                "score": score_float
+            })
+
+        # 7. 孤立ノードの除去
+        connected_node_ids: Set[str] = set()
+        for edge in edges:
+            connected_node_ids.add(edge['from_node'])
+            connected_node_ids.add(edge['to_node'])
+
+        final_nodes = []
+        for node_id, node_data in nodes.items():
+            if node_id in connected_node_ids:
+                final_nodes.append(node_data)
+
+        return {"nodes": final_nodes, "edges": edges}
 
     async def get_new_and_eligible_keywords(self,
                                             seed_keyword: str,

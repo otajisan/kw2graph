@@ -1,8 +1,9 @@
 import json
 from contextlib import asynccontextmanager
+from typing import List
 
 import structlog
-from fastapi import FastAPI, Depends, BackgroundTasks
+from fastapi import FastAPI, Depends, BackgroundTasks, Query
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -143,12 +144,30 @@ async def submit_analysis_task(
 
 @app.get('/show_graph', response_model=ShowGraphOutput)
 async def show_graph(
-        request: ShowGraphInput = Depends(),
+        seed_keywords_raw: str = Query(..., alias="seed_keywords"),
+        max_depth: int = 2,
+        min_score: float = 0.0,
+        entity_type: str | None = None,
+        iab_category: str | None = None,
         repo: GraphDatabaseRepository = Depends(get_graphdb_repository)
-):  # ★ パラメータを追加
+):
     """
     指定されたキーワードを起点とする関連グラフデータを、指定された深さまで取得する。
     """
+    # 1. seed_keywords_raw をリストにパース
+    seed_keywords_list: List[str] = [
+        kw.strip() for kw in seed_keywords_raw.split(',') if kw.strip()
+    ]
+
+    # 2. Pydanticモデルを構築 (関数外で手動構築)
+    request = ShowGraphInput(
+        seed_keywords=seed_keywords_list,
+        max_depth=max_depth,
+        min_score=min_score,
+        entity_type=entity_type,
+        iab_category=iab_category,
+    )
+
     use_case = ShowGraphUseCase(settings, graph_repo=repo)
     response = await use_case.execute(request)
 

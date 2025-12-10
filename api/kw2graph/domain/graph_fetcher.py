@@ -17,9 +17,15 @@ class GraphFetcherService(ServiceBase):
         グラフリポジトリから関連グラフデータを取得する。
         """
         # 現在、特別なドメインロジックはないため、リポジトリを直接呼び出す
-        response = await self.repo.fetch_related_graph(in_data.seed_keyword, in_data.max_depth, in_data.min_score,
-                                                       in_data.entity_type, in_data.iab_category)
+        if len(in_data.seed_keywords) > 1:
+            response = await self.repo.fetch_common_nodes(in_data.seed_keywords, in_data.min_score,
+                                                          in_data.entity_type, in_data.iab_category)
 
-        logger.info(f"fetch {in_data.seed_keyword} result: {response}")
+        else:
+            response = await self.repo.fetch_related_graph(in_data.seed_keywords[0], in_data.max_depth,
+                                                           in_data.min_score,
+                                                           in_data.entity_type, in_data.iab_category)
+
+        logger.info(f"fetch {in_data.seed_keywords} result: {response}")
 
         return response

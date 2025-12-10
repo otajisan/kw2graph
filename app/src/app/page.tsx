@@ -1,6 +1,6 @@
 'use client';
 
-import React, {useState, useCallback, useTransition, useEffect, useRef} from 'react';
+import React, {useState, useCallback, useTransition, useEffect, useRef, useMemo} from 'react';
 import axios, {AxiosError} from 'axios';
 
 // Material UI のコンポーネントをインポート
@@ -104,7 +104,7 @@ interface SubmitTaskOutput {
 // --- メインコンポーネント ---
 
 export default function Home() {
-    const [keyword, setKeyword] = useState<string>('');
+    const [seedKeywordInput, setSeedKeywordInput] = useState<string>('');
     // 💡 maxDepth State を追加 (デフォルト値 2 に対応)
     const [maxDepth, setMaxDepth] = useState<number>(2);
     const [minScore, setMinScore] = useState<number>(0.5);
@@ -127,6 +127,13 @@ export default function Home() {
 
     const [createStatus, setCreateStatus] = useState<'idle' | 'success' | 'failure'>('idle');
 
+    const seedKeywordsArray = useMemo(() => {
+        // カンマ、スペース、全角スペース、全角カンマで分割し、空の要素を除去
+        return seedKeywordInput
+            .split(/[,\s，　]+/)
+            .map(kw => kw.trim())
+            .filter(kw => kw.length > 0);
+    }, [seedKeywordInput]);
 
     // --- API関数群 ---
     // (handleAxiosError は省略 - 変更なし)
@@ -188,7 +195,6 @@ export default function Home() {
     }, []);
 
     // fetchCreateGraph (省略 - 変更なし)
-// fetchCreateGraph の修正
     const fetchCreateGraph = useCallback(async (data: AnalyzeKeywordsOutput) => {
         setCreateStatus('idle');
         setError(null);
@@ -225,18 +231,29 @@ export default function Home() {
     }, []);
 
     // 💡 Show Graph API のロジックを修正
-    const fetchShowGraph = useCallback(async (seedKeyword: string, depth: number, score: number, entity: string, iab: string) => {
+    const fetchShowGraph = useCallback(async (keywords: string[], depth: number, score: number, entity: string, iab: string) => {
+        if (keywords.length === 0) {
+            alert("キーワードを入力してください。");
+            return;
+        }
+
         setGraphData(null);
         setError(null);
         setCreateStatus('idle');
 
+        const isCommonNodeSearch = keywords.length > 1;
+        const keywordsString = keywords.join(',');
+
         // 💡 クエリパラメータに新しいフィルタを追加
         const params = new URLSearchParams({
-            seed_keyword: seedKeyword,
+            seed_keywords: keywordsString,
             max_depth: depth.toString(),
             min_score: score.toString(), // 最小スコアを追加
-
         });
+
+        if (!isCommonNodeSearch) {
+            params.set('max_depth', depth.toString());
+        }
 
         if (entity !== 'all') {
             params.set('entity_type', entity); // entity_type フィルタを追加
@@ -293,12 +310,12 @@ export default function Home() {
     // --- イベントハンドラ ---
     // (handleGetCandidate, handleAnalyze, handleCreateGraph は省略 - 変更なし)
     const handleGetCandidate = () => {
-        if (!keyword.trim()) {
+        if (!seedKeywordInput.trim()) {
             setError('キーワードを入力してください。');
             return;
         }
         startTransition(() => {
-            fetchCandidate(keyword);
+            fetchCandidate(seedKeywordInput);
         });
     };
 
@@ -326,14 +343,14 @@ export default function Home() {
 
     // 💡 Show Graph ボタンクリック時の処理を修正
     const handleShowGraph = () => {
-        if (!keyword.trim()) {
+        if (!seedKeywordInput.trim()) {
             setError('グラフ表示を実行するには、検索キーワードを入力してください。');
             return;
         }
 
         startGraphTransition(() => {
             fetchShowGraph(
-                keyword,
+                seedKeywordsArray,
                 maxDepth,
                 minScore,
                 entityTypeFilter,
@@ -364,13 +381,13 @@ export default function Home() {
 
     // 💡 Submit Task ボタンクリック時の処理
     const handleSubmitTask = () => {
-        if (!keyword.trim()) {
+        if (!seedKeywordInput.trim()) {
             setError('キーワードを入力してください。');
             return;
         }
 
         startSubmitTransition(() => {
-            fetchSubmitTask(keyword, 100); // 例: 最大100件のタイトルを取得する
+            fetchSubmitTask(seedKeywordInput, 100); // 例: 最大100件のタイトルを取得する
         });
     };
 
@@ -395,8 +412,8 @@ export default function Home() {
                             fullWidth
                             label="検索キーワード (グラフの起点)"
                             variant="outlined"
-                            value={keyword}
-                            onChange={(e) => setKeyword(e.target.value)}
+                            value={seedKeywordInput}
+                            onChange={(e) => setSeedKeywordInput(e.target.value)}
                             placeholder="例: 料理"
                             disabled={isPending || isAnalyzePending || isCreatePending || isGraphPending}
                             InputProps={{
@@ -426,7 +443,7 @@ export default function Home() {
                         variant="contained"
                         color="primary"
                         onClick={handleGetCandidate}
-                        disabled={isPending || !keyword.trim()}
+                        disabled={isPending || !seedKeywordInput.trim()}
                         startIcon={isPending ? <CircularProgress size={20} color="inherit"/> : null}
                     >
                         {isPending ? '検索中...' : 'Get Candidate'}
@@ -459,7 +476,7 @@ export default function Home() {
                         variant="contained"
                         sx={{bgcolor: '#0097a7', '&:hover': {bgcolor: '#007983'}}}
                         onClick={handleShowGraph}
-                        disabled={!keyword.trim() || isGraphPending || isPending || isAnalyzePending || isCreatePending}
+                        disabled={!seedKeywordInput.trim() || isGraphPending || isPending || isAnalyzePending || isCreatePending}
                         startIcon={isGraphPending ? <CircularProgress size={20} color="inherit"/> : null}
                     >
                         {isGraphPending ? '描画中...' : 'Show Graph'}
@@ -470,7 +487,7 @@ export default function Home() {
                         variant="contained"
                         sx={{bgcolor: '#4527a0', '&:hover': {bgcolor: '#3949ab'}, minWidth: '150px'}}
                         onClick={handleSubmitTask}
-                        disabled={!keyword.trim() || isSubmitPending || isPending || isAnalyzePending || isCreatePending || isGraphPending}
+                        disabled={!seedKeywordInput.trim() || isSubmitPending || isPending || isAnalyzePending || isCreatePending || isGraphPending}
                         startIcon={isSubmitPending ? <CircularProgress size={20} color="inherit"/> : null}
                     >
                         {isSubmitPending ? '送信中...' : 'Submit Task'}
@@ -548,7 +565,7 @@ export default function Home() {
                     <GraphVisualizationComponent
                         data={graphData}
                         isGraphPending={isGraphPending}
-                        keyword={keyword}
+                        keyword={seedKeywordInput}
                         maxDepth={maxDepth}
                         minScore={minScore} // 💡 追加
                         entityTypeFilter={entityTypeFilter} // 💡 追加
@@ -568,7 +585,7 @@ export default function Home() {
 
                 {/* Submit Task結果の表示 */}
                 {submitResult && (
-                    <SubmitResultDisplay status={submitResult} keyword={keyword}/>
+                    <SubmitResultDisplay status={submitResult} keyword={seedKeywordInput}/>
                 )}
 
             </Paper>
@@ -821,13 +838,14 @@ interface SubmitResultDisplayProps {
     keyword: string;
 }
 
-const SubmitResultDisplay: React.FC<SubmitResultDisplayProps> = ({ status, keyword }) => {
+const SubmitResultDisplay: React.FC<SubmitResultDisplayProps> = ({status, keyword}) => {
     if (status === 'submitted') {
         return (
             <Alert severity="success" sx={{mb: 2}}>
                 <Typography component="p" sx={{fontWeight: 'bold'}}>タスク送信完了 🎉</Typography>
                 <Typography variant="body2">
-                    キーワード「{keyword}」の解析と登録処理をバックグラウンドで開始しました。処理完了後、`Show Graph` ボタンでグラフを確認できます。
+                    キーワード「{keyword}」の解析と登録処理をバックグラウンドで開始しました。処理完了後、`Show Graph`
+                    ボタンでグラフを確認できます。
                 </Typography>
             </Alert>
         );
